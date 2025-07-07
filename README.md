@@ -1,4 +1,4 @@
-# granular: High-Performance Incremental File Cache
+# granular: A High-Performance Incremental File Cache
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/gophersatwork/granular.svg)](https://pkg.go.dev/github.com/gophersatwork/granular)
 [![Go Report Card](https://goreportcard.com/badge/github.com/gophersatwork/granular)](https://goreportcard.com/report/github.com/gophersatwork/granular)
