@@ -125,7 +125,7 @@ func TestContentBasedFileCache(t *testing.T) {
 
 	// First get should be a miss
 	processedFilePath := filePath + ".processed"
-	result, hit, err := cache.Get(key)
+	_, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestContentBasedFileCache(t *testing.T) {
 	}
 
 	// Second get should be a hit
-	result, hit, err = cache.Get(key)
+	result, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestContentBasedFileCache(t *testing.T) {
 	}
 
 	// Third get should be a miss due to modified content
-	result, hit, err = cache.Get(key)
+	_, hit, err = cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestIncrementalComputation(t *testing.T) {
 
 	// First get should be a miss
 	outputFile := "results.json"
-	result, hit, err := cache.Get(key)
+	_, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestIncrementalComputation(t *testing.T) {
 	}
 
 	// Second get should be a hit
-	result, hit, err = cache.Get(key)
+	result, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestIncrementalComputation(t *testing.T) {
 	}
 
 	// Third get should be a miss due to modified input
-	result, hit, err = cache.Get(key)
+	_, hit, err = cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestLocalDevOptimization(t *testing.T) {
 	}
 
 	// First get should be a miss
-	result, hit, err := cache.Get(key)
+	_, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestLocalDevOptimization(t *testing.T) {
 	}
 
 	// Second get should be a hit
-	result, hit, err = cache.Get(key)
+	result, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestLocalDevOptimization(t *testing.T) {
 	}
 
 	// Third get should be a miss due to modified source
-	result, hit, err = cache.Get(key)
+	_, hit, err = cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -603,7 +603,7 @@ jobs:
 	}
 
 	// First get should be a miss
-	result, hit, err := cache.Get(key)
+	_, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -642,7 +642,7 @@ jobs:
 	}
 
 	// Second get should be a hit
-	result, hit, err = cache.Get(key)
+	result, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -681,7 +681,7 @@ jobs:
 	}
 
 	// Third get should be a miss due to the new test file
-	result, hit, err = cache.Get(key)
+	_, hit, err = cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -793,7 +793,7 @@ func TestDataPipeline(t *testing.T) {
 		}
 
 		// First get should be a miss
-		result, hit, err := cache.Get(key)
+		_, hit, err := cache.Get(key)
 		if err != nil {
 			t.Fatalf("Failed to get from cache for stage %s: %v", stage.name, err)
 		}
@@ -829,7 +829,7 @@ func TestDataPipeline(t *testing.T) {
 		}
 
 		// Second get should be a hit
-		result, hit, err = cache.Get(key)
+		result, hit, err := cache.Get(key)
 		if err != nil {
 			t.Fatalf("Failed to get from cache for stage %s: %v", stage.name, err)
 		}
@@ -938,7 +938,7 @@ func TestBuildSystemCache(t *testing.T) {
 	}
 
 	// First get should be a miss
-	result, hit, err := cache.Get(key)
+	_, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -975,7 +975,7 @@ func TestBuildSystemCache(t *testing.T) {
 	}
 
 	// Second get should be a hit
-	result, hit, err = cache.Get(key)
+	result, hit, err := cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}
@@ -998,7 +998,7 @@ func TestBuildSystemCache(t *testing.T) {
 	}
 
 	// Third get should be a miss due to modified source
-	result, hit, err = cache.Get(key)
+	_, hit, err = cache.Get(key)
 	if err != nil {
 		t.Fatalf("Failed to get from cache: %v", err)
 	}

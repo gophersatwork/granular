@@ -25,7 +25,7 @@ func (f FileInput) Hash(h hash.Hash) error {
 	if fs == nil {
 		fs = afero.NewOsFs()
 	}
-	b, err := afero.ReadFile(f.Fs, f.Path)
+	b, err := afero.ReadFile(fs, f.Path)
 	if err != nil {
 		return err
 	}

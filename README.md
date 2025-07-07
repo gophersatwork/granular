@@ -1,4 +1,4 @@
-# granular: High-Performance Incremental File Cache for Go
+# granular: High-Performance Incremental File Cache
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/gophersatwork/granular.svg)](https://pkg.go.dev/github.com/gophersatwork/granular)
 [![Go Report Card](https://goreportcard.com/badge/github.com/gophersatwork/granular)](https://goreportcard.com/report/github.com/gophersatwork/granular)
@@ -134,9 +134,8 @@ cache, err := granular.New(
 
 ## Performance Considerations
 
-- **Hash function**: xxHash is used by default for its speed, but you can provide a custom hash function.
+- **Hash function**: `xxHash` is used by default for its speed, but you can provide a custom hash function.
 - **Buffer pooling**: Reuses buffers to reduce memory allocations.
-- **Manifest caching**: Hot manifests are cached in memory to avoid disk I/O.
 - **2-level directory**: Uses first 2 characters of hash for better filesystem distribution.
 
 ## File Structure

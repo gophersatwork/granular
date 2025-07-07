@@ -481,7 +481,7 @@ func TestGetFile(t *testing.T) {
 			},
 		},
 	}
-	_, found, err = cache.GetFile(nonExistentKey, filepath.Base(outputFilePath))
+	_, found, _ = cache.GetFile(nonExistentKey, filepath.Base(outputFilePath))
 	if found {
 		t.Fatalf("Expected not found for non-existent key, got found")
 	}
@@ -566,7 +566,7 @@ func TestGetData(t *testing.T) {
 			},
 		},
 	}
-	_, found, err = cache.GetData(nonExistentKey, "data1")
+	_, found, _ = cache.GetData(nonExistentKey, "data1")
 	if found {
 		t.Fatalf("Expected not found for non-existent cache key, got found")
 	}

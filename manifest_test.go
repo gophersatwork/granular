@@ -48,7 +48,7 @@ func TestCache_computeKeyHash(t *testing.T) {
 
 		files := []string{"test.txt", "test2.txt", "test3.txt"}
 
-		err = createFile(t, memFs, files...)
+		createFile(t, memFs, files...)
 
 		key := Key{
 			Inputs: toFileInputs(t, memFs, files),
@@ -447,7 +447,7 @@ func toFileInputs(t *testing.T, fs afero.Fs, files []string) []Input {
 	return inputs
 }
 
-func createFile(t *testing.T, memFs afero.Fs, fileNames ...string) error {
+func createFile(t *testing.T, memFs afero.Fs, fileNames ...string) {
 	t.Helper()
 
 	for _, name := range fileNames {
@@ -456,7 +456,6 @@ func createFile(t *testing.T, memFs afero.Fs, fileNames ...string) error {
 			t.Fatal(err)
 		}
 	}
-	return nil
 }
 
 func TestCache_computeOutputHash(t *testing.T) {
