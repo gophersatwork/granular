@@ -165,7 +165,7 @@ func (c *Cache) Store(key Key, result Result) error {
 
 	// Create the object directory
 	objectDir := c.objectPath(keyHash)
-	if err := c.fs.MkdirAll(objectDir, 0755); err != nil {
+	if err := c.fs.MkdirAll(objectDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create object directory: %w", err)
 	}
 
@@ -289,10 +289,10 @@ func (c *Cache) Clear() error {
 	}
 
 	// Recreate the directories
-	if err := c.fs.MkdirAll(c.manifestDir(), 0755); err != nil {
+	if err := c.fs.MkdirAll(c.manifestDir(), 0o755); err != nil {
 		return fmt.Errorf("failed to create manifests directory: %w", err)
 	}
-	if err := c.fs.MkdirAll(c.objectsDir(), 0755); err != nil {
+	if err := c.fs.MkdirAll(c.objectsDir(), 0o755); err != nil {
 		return fmt.Errorf("failed to create objects directory: %w", err)
 	}
 

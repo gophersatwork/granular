@@ -270,7 +270,7 @@ func setupTestCache(t *testing.T, tempDirName string) (*Cache, afero.Fs, string)
 
 	// Create a temporary directory for the test
 	tempDir := "/" + tempDirName
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -293,7 +293,7 @@ func createTestFile(t *testing.T, fs afero.Fs, path string, content []byte) {
 		createTestDir(t, fs, dir)
 	}
 
-	if err := afero.WriteFile(fs, path, content, 0644); err != nil {
+	if err := afero.WriteFile(fs, path, content, 0o644); err != nil {
 		t.Fatalf("Failed to write file %s: %v", path, err)
 	}
 }
@@ -302,7 +302,7 @@ func createTestFile(t *testing.T, fs afero.Fs, path string, content []byte) {
 func createTestDir(t *testing.T, fs afero.Fs, path string) {
 	t.Helper()
 
-	if err := fs.MkdirAll(path, 0755); err != nil {
+	if err := fs.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("Failed to create directory %s: %v", path, err)
 	}
 }

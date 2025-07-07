@@ -11,7 +11,6 @@ import (
 )
 
 func TestCache_computeKeyHash(t *testing.T) {
-
 	t.Run("Single file input", func(t *testing.T) {
 		memFs := afero.NewMemMapFs()
 		cache, err := New("", WithFs(memFs))
@@ -20,7 +19,7 @@ func TestCache_computeKeyHash(t *testing.T) {
 		}
 
 		filename := "test.txt"
-		afero.WriteFile(memFs, filename, []byte("some content"), 0644)
+		afero.WriteFile(memFs, filename, []byte("some content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{FileInput{
@@ -72,7 +71,7 @@ func TestCache_computeKeyHash(t *testing.T) {
 		}
 
 		filename := "test.txt"
-		afero.WriteFile(memFs, filename, []byte("some content"), 0644)
+		afero.WriteFile(memFs, filename, []byte("some content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{FileInput{
@@ -196,10 +195,10 @@ func TestCache_computeKeyHash(t *testing.T) {
 		}
 
 		// Create some files that match the glob pattern
-		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0644)
-		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0644)
-		afero.WriteFile(memFs, "test3.txt", []byte("test3 content"), 0644)
-		afero.WriteFile(memFs, "other.log", []byte("other content"), 0644)
+		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0o644)
+		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0o644)
+		afero.WriteFile(memFs, "test3.txt", []byte("test3 content"), 0o644)
+		afero.WriteFile(memFs, "other.log", []byte("other content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{GlobInput{
@@ -226,11 +225,11 @@ func TestCache_computeKeyHash(t *testing.T) {
 		}
 
 		// Create some files that match different glob patterns
-		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0644)
-		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0644)
-		afero.WriteFile(memFs, "data1.json", []byte("data1 content"), 0644)
-		afero.WriteFile(memFs, "data2.json", []byte("data2 content"), 0644)
-		afero.WriteFile(memFs, "config.yaml", []byte("config content"), 0644)
+		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0o644)
+		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0o644)
+		afero.WriteFile(memFs, "data1.json", []byte("data1 content"), 0o644)
+		afero.WriteFile(memFs, "data2.json", []byte("data2 content"), 0o644)
+		afero.WriteFile(memFs, "config.yaml", []byte("config content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{
@@ -267,10 +266,10 @@ func TestCache_computeKeyHash(t *testing.T) {
 		}
 
 		// Create some files that match different glob patterns
-		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0644)
-		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0644)
-		afero.WriteFile(memFs, "data1.json", []byte("data1 content"), 0644)
-		afero.WriteFile(memFs, "data2.json", []byte("data2 content"), 0644)
+		afero.WriteFile(memFs, "test1.txt", []byte("test1 content"), 0o644)
+		afero.WriteFile(memFs, "test2.txt", []byte("test2 content"), 0o644)
+		afero.WriteFile(memFs, "data1.json", []byte("data1 content"), 0o644)
+		afero.WriteFile(memFs, "data2.json", []byte("data2 content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{
@@ -309,10 +308,10 @@ func TestCache_computeKeyHash(t *testing.T) {
 
 		// Create a directory with some files
 		dirPath := "testdir"
-		memFs.MkdirAll(dirPath, 0755)
-		afero.WriteFile(memFs, dirPath+"/file1.txt", []byte("file1 content"), 0644)
-		afero.WriteFile(memFs, dirPath+"/file2.txt", []byte("file2 content"), 0644)
-		afero.WriteFile(memFs, dirPath+"/file3.txt", []byte("file3 content"), 0644)
+		memFs.MkdirAll(dirPath, 0o755)
+		afero.WriteFile(memFs, dirPath+"/file1.txt", []byte("file1 content"), 0o644)
+		afero.WriteFile(memFs, dirPath+"/file2.txt", []byte("file2 content"), 0o644)
+		afero.WriteFile(memFs, dirPath+"/file3.txt", []byte("file3 content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{DirectoryInput{
@@ -343,17 +342,17 @@ func TestCache_computeKeyHash(t *testing.T) {
 		dir2Path := "testdir2"
 		dir3Path := "testdir3"
 
-		memFs.MkdirAll(dir1Path, 0755)
-		memFs.MkdirAll(dir2Path, 0755)
-		memFs.MkdirAll(dir3Path, 0755)
+		memFs.MkdirAll(dir1Path, 0o755)
+		memFs.MkdirAll(dir2Path, 0o755)
+		memFs.MkdirAll(dir3Path, 0o755)
 
-		afero.WriteFile(memFs, dir1Path+"/file1.txt", []byte("dir1 file1 content"), 0644)
-		afero.WriteFile(memFs, dir1Path+"/file2.txt", []byte("dir1 file2 content"), 0644)
+		afero.WriteFile(memFs, dir1Path+"/file1.txt", []byte("dir1 file1 content"), 0o644)
+		afero.WriteFile(memFs, dir1Path+"/file2.txt", []byte("dir1 file2 content"), 0o644)
 
-		afero.WriteFile(memFs, dir2Path+"/data1.json", []byte("dir2 data1 content"), 0644)
-		afero.WriteFile(memFs, dir2Path+"/data2.json", []byte("dir2 data2 content"), 0644)
+		afero.WriteFile(memFs, dir2Path+"/data1.json", []byte("dir2 data1 content"), 0o644)
+		afero.WriteFile(memFs, dir2Path+"/data2.json", []byte("dir2 data2 content"), 0o644)
 
-		afero.WriteFile(memFs, dir3Path+"/config.yaml", []byte("dir3 config content"), 0644)
+		afero.WriteFile(memFs, dir3Path+"/config.yaml", []byte("dir3 config content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{
@@ -393,14 +392,14 @@ func TestCache_computeKeyHash(t *testing.T) {
 		dir1Path := "config"
 		dir2Path := "src"
 
-		memFs.MkdirAll(dir1Path, 0755)
-		memFs.MkdirAll(dir2Path, 0755)
+		memFs.MkdirAll(dir1Path, 0o755)
+		memFs.MkdirAll(dir2Path, 0o755)
 
-		afero.WriteFile(memFs, dir1Path+"/settings.json", []byte("settings content"), 0644)
-		afero.WriteFile(memFs, dir1Path+"/env.yaml", []byte("env content"), 0644)
+		afero.WriteFile(memFs, dir1Path+"/settings.json", []byte("settings content"), 0o644)
+		afero.WriteFile(memFs, dir1Path+"/env.yaml", []byte("env content"), 0o644)
 
-		afero.WriteFile(memFs, dir2Path+"/main.go", []byte("main content"), 0644)
-		afero.WriteFile(memFs, dir2Path+"/utils.go", []byte("utils content"), 0644)
+		afero.WriteFile(memFs, dir2Path+"/main.go", []byte("main content"), 0o644)
+		afero.WriteFile(memFs, dir2Path+"/utils.go", []byte("utils content"), 0o644)
 
 		key := Key{
 			Inputs: []Input{
@@ -431,7 +430,6 @@ func TestCache_computeKeyHash(t *testing.T) {
 			t.Fatalf("expected hash to be '58f21dc3cd5f1df7', got %s", hash)
 		}
 	})
-
 }
 
 func toFileInputs(t *testing.T, fs afero.Fs, files []string) []Input {
@@ -451,7 +449,7 @@ func createFile(t *testing.T, memFs afero.Fs, fileNames ...string) {
 	t.Helper()
 
 	for _, name := range fileNames {
-		err := afero.WriteFile(memFs, name, []byte(name+" some content"), 0644)
+		err := afero.WriteFile(memFs, name, []byte(name+" some content"), 0o644)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -468,7 +466,7 @@ func TestCache_computeOutputHash(t *testing.T) {
 
 		// Create a test output file
 		outputFile := "output.txt"
-		err = afero.WriteFile(memFs, outputFile, []byte("output content"), 0644)
+		err = afero.WriteFile(memFs, outputFile, []byte("output content"), 0o644)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -491,7 +489,7 @@ func TestCache_computeOutputHash(t *testing.T) {
 		// Create multiple test output files
 		outputFiles := []string{"output1.txt", "output2.txt", "output3.txt"}
 		for _, file := range outputFiles {
-			err := afero.WriteFile(memFs, file, []byte(file+" content"), 0644)
+			err := afero.WriteFile(memFs, file, []byte(file+" content"), 0o644)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -594,7 +592,7 @@ func TestCache_computeOutputHash(t *testing.T) {
 		// Create test output files
 		outputFiles := []string{"output1.txt", "output2.txt"}
 		for _, file := range outputFiles {
-			err := afero.WriteFile(memFs, file, []byte(file+" content"), 0644)
+			err := afero.WriteFile(memFs, file, []byte(file+" content"), 0o644)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -827,11 +825,11 @@ func TestCache_loadManifest(t *testing.T) {
 		// Create a manifest file with invalid JSON
 		keyHash := "invalidjson"
 		manifestDir := filepath.Dir(cache.manifestPath(keyHash))
-		err = memFs.MkdirAll(manifestDir, 0755)
+		err = memFs.MkdirAll(manifestDir, 0o755)
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = afero.WriteFile(memFs, cache.manifestPath(keyHash), []byte("invalid json"), 0644)
+		err = afero.WriteFile(memFs, cache.manifestPath(keyHash), []byte("invalid json"), 0o644)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -121,7 +121,6 @@ func (g GlobInput) Hash(h hash.Hash) error {
 
 		return nil
 	})
-
 	if err != nil {
 		return err
 	}
@@ -202,7 +201,6 @@ func (d DirectoryInput) Hash(h hash.Hash) error {
 		files = append(files, path)
 		return nil
 	})
-
 	if err != nil {
 		return err
 	}

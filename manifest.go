@@ -69,7 +69,7 @@ func (c *Cache) computeKeyHash(key Key) (string, error) {
 func (c *Cache) saveManifest(manifest *Manifest) error {
 	// Create the manifest directory if it doesn't exist
 	manifestDir := filepath.Dir(c.manifestPath(manifest.KeyHash))
-	if err := c.fs.MkdirAll(manifestDir, 0755); err != nil {
+	if err := c.fs.MkdirAll(manifestDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create manifest directory: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (c *Cache) saveManifest(manifest *Manifest) error {
 	}
 
 	// Write the manifest file
-	if err := afero.WriteFile(c.fs, c.manifestPath(manifest.KeyHash), data, 0644); err != nil {
+	if err := afero.WriteFile(c.fs, c.manifestPath(manifest.KeyHash), data, 0o644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 

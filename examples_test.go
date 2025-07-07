@@ -25,7 +25,7 @@ func TestArtifactCache(t *testing.T) {
 	}
 
 	schemaFile := "schema.proto"
-	err = afero.WriteFile(memFs, schemaFile, []byte("fake schema.proto content"), 0644)
+	err = afero.WriteFile(memFs, schemaFile, []byte("fake schema.proto content"), 0o644)
 	if err != nil {
 		log.Fatalf("Failed to write schema file: %v", err)
 	}
@@ -91,7 +91,6 @@ func TestArtifactCache(t *testing.T) {
 	if gotGenerationTime != expectedGenerationTime {
 		log.Fatalf("Unexpected generation time metadata. Expected %q, but found %q", expectedGenerationTime, gotGenerationTime)
 	}
-
 }
 
 func TestContentBasedFileCache(t *testing.T) {
@@ -107,7 +106,7 @@ func TestContentBasedFileCache(t *testing.T) {
 	// Create test file
 	filePath := "large-dataset.csv"
 	fileContent := "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n"
-	err = afero.WriteFile(memFs, filePath, []byte(fileContent), 0644)
+	err = afero.WriteFile(memFs, filePath, []byte(fileContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestContentBasedFileCache(t *testing.T) {
 
 	// Process the file (just create a mock processed file)
 	processedContent := "processed:" + fileContent
-	err = afero.WriteFile(memFs, processedFilePath, []byte(processedContent), 0644)
+	err = afero.WriteFile(memFs, processedFilePath, []byte(processedContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write processed file: %v", err)
 	}
@@ -177,7 +176,7 @@ func TestContentBasedFileCache(t *testing.T) {
 
 	// Modify the original file
 	newFileContent := "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n4,item4,400\n"
-	err = afero.WriteFile(memFs, filePath, []byte(newFileContent), 0644)
+	err = afero.WriteFile(memFs, filePath, []byte(newFileContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to update test file: %v", err)
 	}
@@ -204,7 +203,7 @@ func TestIncrementalComputation(t *testing.T) {
 
 	// Create test directory and files
 	inputDir := "data"
-	err = memFs.MkdirAll(inputDir, 0755)
+	err = memFs.MkdirAll(inputDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create input directory: %v", err)
 	}
@@ -223,7 +222,7 @@ func TestIncrementalComputation(t *testing.T) {
 
 	for _, df := range dataFiles {
 		filePath := filepath.Join(inputDir, df.name)
-		err = afero.WriteFile(memFs, filePath, []byte(df.content), 0644)
+		err = afero.WriteFile(memFs, filePath, []byte(df.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write data file %s: %v", df.name, err)
 		}
@@ -232,7 +231,7 @@ func TestIncrementalComputation(t *testing.T) {
 	// Create config file
 	configFile := "config.json"
 	configContent := `{"parameter1": "value1", "parameter2": "value2"}`
-	err = afero.WriteFile(memFs, configFile, []byte(configContent), 0644)
+	err = afero.WriteFile(memFs, configFile, []byte(configContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
@@ -268,7 +267,7 @@ func TestIncrementalComputation(t *testing.T) {
 
 	// Perform the computation (just create a mock result file)
 	resultContent := `{"result": "computed data", "count": 3}`
-	err = afero.WriteFile(memFs, outputFile, []byte(resultContent), 0644)
+	err = afero.WriteFile(memFs, outputFile, []byte(resultContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write result file: %v", err)
 	}
@@ -319,7 +318,7 @@ func TestIncrementalComputation(t *testing.T) {
 	// Modify one of the input files
 	modifiedDataPath := filepath.Join(inputDir, "data1.txt")
 	modifiedContent := "This is modified data file 1"
-	err = afero.WriteFile(memFs, modifiedDataPath, []byte(modifiedContent), 0644)
+	err = afero.WriteFile(memFs, modifiedDataPath, []byte(modifiedContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to update data file: %v", err)
 	}
@@ -346,7 +345,7 @@ func TestLocalDevOptimization(t *testing.T) {
 
 	// Create test directory structure
 	srcDir := "src"
-	err = memFs.MkdirAll(srcDir, 0755)
+	err = memFs.MkdirAll(srcDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create src directory: %v", err)
 	}
@@ -358,7 +357,7 @@ func TestLocalDevOptimization(t *testing.T) {
 		filepath.Join(srcDir, "utils"),
 	}
 	for _, dir := range nestedDirs {
-		err = memFs.MkdirAll(dir, 0755)
+		err = memFs.MkdirAll(dir, 0o755)
 		if err != nil {
 			t.Fatalf("Failed to create directory %s: %v", dir, err)
 		}
@@ -375,7 +374,7 @@ func TestLocalDevOptimization(t *testing.T) {
 	}
 
 	for _, sf := range sourceFiles {
-		err = afero.WriteFile(memFs, sf.path, []byte(sf.content), 0644)
+		err = afero.WriteFile(memFs, sf.path, []byte(sf.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write source file %s: %v", sf.path, err)
 		}
@@ -383,7 +382,7 @@ func TestLocalDevOptimization(t *testing.T) {
 
 	// Create config directory and files
 	configDir := "config"
-	err = memFs.MkdirAll(configDir, 0755)
+	err = memFs.MkdirAll(configDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create config directory: %v", err)
 	}
@@ -397,18 +396,18 @@ func TestLocalDevOptimization(t *testing.T) {
 	}
 
 	for _, cf := range configFiles {
-		err = afero.WriteFile(memFs, cf.path, []byte(cf.content), 0644)
+		err = afero.WriteFile(memFs, cf.path, []byte(cf.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write config file %s: %v", cf.path, err)
 		}
 	}
 
 	// Create dependency files
-	err = afero.WriteFile(memFs, "go.mod", []byte("module example.com/myapp\n\ngo 1.16\n"), 0644)
+	err = afero.WriteFile(memFs, "go.mod", []byte("module example.com/myapp\n\ngo 1.16\n"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.mod file: %v", err)
 	}
-	err = afero.WriteFile(memFs, "go.sum", []byte("example.com/dependency v1.0.0 h1:hash\n"), 0644)
+	err = afero.WriteFile(memFs, "go.sum", []byte("example.com/dependency v1.0.0 h1:hash\n"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.sum file: %v", err)
 	}
@@ -445,7 +444,7 @@ func TestLocalDevOptimization(t *testing.T) {
 	// Run the linter (simulate by creating an output file)
 	lintOutputFile := "lint-output.txt"
 	lintOutput := "src/api/handlers.go:3:1: exported function Handler should have comment\n"
-	err = afero.WriteFile(memFs, lintOutputFile, []byte(lintOutput), 0644)
+	err = afero.WriteFile(memFs, lintOutputFile, []byte(lintOutput), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write lint output file: %v", err)
 	}
@@ -504,7 +503,7 @@ func TestLocalDevOptimization(t *testing.T) {
 
 	// Fix the lint issue
 	fixedHandlerContent := "package api\n\n// Handler is an API handler\nfunc Handler() {}\n"
-	err = afero.WriteFile(memFs, filepath.Join(srcDir, "api", "handlers.go"), []byte(fixedHandlerContent), 0644)
+	err = afero.WriteFile(memFs, filepath.Join(srcDir, "api", "handlers.go"), []byte(fixedHandlerContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to update source file: %v", err)
 	}
@@ -530,7 +529,7 @@ func TestCIOptimization(t *testing.T) {
 	}
 
 	// Create test directory structure
-	err = memFs.MkdirAll(".github/workflows", 0755)
+	err = memFs.MkdirAll(".github/workflows", 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create .github/workflows directory: %v", err)
 	}
@@ -548,7 +547,7 @@ jobs:
           go-version: 1.16
       - run: go test ./...
 `
-	err = afero.WriteFile(memFs, ".github/workflows/ci.yml", []byte(ciConfig), 0644)
+	err = afero.WriteFile(memFs, ".github/workflows/ci.yml", []byte(ciConfig), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write CI config file: %v", err)
 	}
@@ -565,18 +564,18 @@ jobs:
 	}
 
 	for _, sf := range sourceFiles {
-		err = afero.WriteFile(memFs, sf.path, []byte(sf.content), 0644)
+		err = afero.WriteFile(memFs, sf.path, []byte(sf.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write file %s: %v", sf.path, err)
 		}
 	}
 
 	// Create dependency files
-	err = afero.WriteFile(memFs, "go.mod", []byte("module example.com/citest\n\ngo 1.16\n"), 0644)
+	err = afero.WriteFile(memFs, "go.mod", []byte("module example.com/citest\n\ngo 1.16\n"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.mod file: %v", err)
 	}
-	err = afero.WriteFile(memFs, "go.sum", []byte("example.com/dependency v1.0.0 h1:hash\n"), 0644)
+	err = afero.WriteFile(memFs, "go.sum", []byte("example.com/dependency v1.0.0 h1:hash\n"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.sum file: %v", err)
 	}
@@ -614,7 +613,7 @@ jobs:
 	// Run the tests (simulate by creating an output file)
 	testOutputFile := "test-output.txt"
 	testOutput := "=== RUN   TestMain\n--- PASS: TestMain (0.00s)\n=== RUN   TestUtil\n--- PASS: TestUtil (0.00s)\nPASS\n"
-	err = afero.WriteFile(memFs, testOutputFile, []byte(testOutput), 0644)
+	err = afero.WriteFile(memFs, testOutputFile, []byte(testOutput), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write test output file: %v", err)
 	}
@@ -675,7 +674,7 @@ jobs:
 	// Add a new test
 	newTestFile := "new_test.go"
 	newTestContent := "package main\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) { t.Log(\"new test passed\") }\n"
-	err = afero.WriteFile(memFs, newTestFile, []byte(newTestContent), 0644)
+	err = afero.WriteFile(memFs, newTestFile, []byte(newTestContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write new test file: %v", err)
 	}
@@ -703,14 +702,14 @@ func TestDataPipeline(t *testing.T) {
 	// Create raw data file
 	rawDataFile := "raw-data.csv"
 	rawDataContent := "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n"
-	err = afero.WriteFile(memFs, rawDataFile, []byte(rawDataContent), 0644)
+	err = afero.WriteFile(memFs, rawDataFile, []byte(rawDataContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write raw data file: %v", err)
 	}
 
 	// Create config directory and files
 	configDir := "config"
-	err = memFs.MkdirAll(configDir, 0755)
+	err = memFs.MkdirAll(configDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create config directory: %v", err)
 	}
@@ -726,7 +725,7 @@ func TestDataPipeline(t *testing.T) {
 
 	for _, cf := range configFiles {
 		filePath := filepath.Join(configDir, cf.name)
-		err = afero.WriteFile(memFs, filePath, []byte(cf.content), 0644)
+		err = afero.WriteFile(memFs, filePath, []byte(cf.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write config file %s: %v", cf.name, err)
 		}
@@ -802,7 +801,7 @@ func TestDataPipeline(t *testing.T) {
 		}
 
 		// Process this stage (create the output file)
-		err = afero.WriteFile(memFs, stage.output, []byte(stage.content), 0644)
+		err = afero.WriteFile(memFs, stage.output, []byte(stage.content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write output file for stage %s: %v", stage.name, err)
 		}
@@ -862,7 +861,7 @@ func TestDataPipeline(t *testing.T) {
 
 	// Modify the raw data file
 	newRawDataContent := "id,name,value\n1,item1,100\n2,item2,200\n3,item3,300\n4,item4,400\n"
-	err = afero.WriteFile(memFs, rawDataFile, []byte(newRawDataContent), 0644)
+	err = afero.WriteFile(memFs, rawDataFile, []byte(newRawDataContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to update raw data file: %v", err)
 	}
@@ -904,15 +903,15 @@ func TestBuildSystemCache(t *testing.T) {
 	goSumContent := "example.com/dependency v1.0.0 h1:hash\n"
 	mainGoContent := "package main\n\nfunc main() {\n\tfmt.Println(\"Hello, world!\")\n}\n"
 
-	err = afero.WriteFile(memFs, "go.mod", []byte(goModContent), 0644)
+	err = afero.WriteFile(memFs, "go.mod", []byte(goModContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.mod file: %v", err)
 	}
-	err = afero.WriteFile(memFs, "go.sum", []byte(goSumContent), 0644)
+	err = afero.WriteFile(memFs, "go.sum", []byte(goSumContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write go.sum file: %v", err)
 	}
-	err = afero.WriteFile(memFs, "main.go", []byte(mainGoContent), 0644)
+	err = afero.WriteFile(memFs, "main.go", []byte(mainGoContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write main.go file: %v", err)
 	}
@@ -949,7 +948,7 @@ func TestBuildSystemCache(t *testing.T) {
 	// "Build" the application
 	binaryContent := []byte("mock binary content")
 	binaryPath := "myapp"
-	err = afero.WriteFile(memFs, binaryPath, binaryContent, 0755)
+	err = afero.WriteFile(memFs, binaryPath, binaryContent, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to write binary file: %v", err)
 	}
@@ -992,7 +991,7 @@ func TestBuildSystemCache(t *testing.T) {
 
 	// Modify a source file
 	newMainGoContent := "package main\n\nfunc main() {\n\tfmt.Println(\"Hello, updated world!\")\n}\n"
-	err = afero.WriteFile(memFs, "main.go", []byte(newMainGoContent), 0644)
+	err = afero.WriteFile(memFs, "main.go", []byte(newMainGoContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to update main.go file: %v", err)
 	}
@@ -1011,7 +1010,7 @@ func generateArtifact(fs afero.Fs, schemaFilePath string) (string, error) {
 	// we're not really creating the output with the protoc tooling, so let's ignore the schema and fake the output file
 	_ = schemaFilePath
 	outputFile := "output.go"
-	err := afero.WriteFile(fs, outputFile, []byte("output from schema proto"), 0644)
+	err := afero.WriteFile(fs, outputFile, []byte("output from schema proto"), 0o644)
 	if err != nil {
 		return "", err
 	}

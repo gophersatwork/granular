@@ -16,7 +16,6 @@ func TestHashFile(t *testing.T) {
 	// Create a temporary directory for the test
 	memFs := afero.NewMemMapFs()
 	tmpDir, err := afero.TempDir(memFs, "", "hash-test")
-
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -32,7 +31,7 @@ func TestHashFile(t *testing.T) {
 			content: []byte("test content"),
 			fileFunc: func(dir string) string {
 				path := filepath.Join(dir, "normal.txt")
-				if err := afero.WriteFile(memFs, path, []byte("test content"), 0644); err != nil {
+				if err := afero.WriteFile(memFs, path, []byte("test content"), 0o644); err != nil {
 					t.Fatalf("Failed to write test file: %v", err)
 				}
 				return path
@@ -43,7 +42,7 @@ func TestHashFile(t *testing.T) {
 			content: []byte{},
 			fileFunc: func(dir string) string {
 				path := filepath.Join(dir, "empty.txt")
-				if err := afero.WriteFile(memFs, path, []byte{}, 0644); err != nil {
+				if err := afero.WriteFile(memFs, path, []byte{}, 0o644); err != nil {
 					t.Fatalf("Failed to write empty file: %v", err)
 				}
 				return path
@@ -67,7 +66,6 @@ func TestHashFile(t *testing.T) {
 
 			// Hash the file using our hashFile
 			err = hashFile(file, h1)
-
 			// Check error expectation
 			if err != nil {
 				t.Errorf("hashFile() error = %v", err)
@@ -90,7 +88,6 @@ func TestHashFile_Fail(t *testing.T) {
 	// Create a temporary directory for the test
 	memFs := afero.NewMemMapFs()
 	tmpDir, err := afero.TempDir(memFs, "", "hash-test")
-
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
@@ -129,7 +126,7 @@ func TestCacheHashFile(t *testing.T) {
 			size:    int64(len([]byte("small file content"))),
 			fileFunc: func(fs afero.Fs) string {
 				path := "/small.txt"
-				if err := afero.WriteFile(fs, path, []byte("small file content"), 0644); err != nil {
+				if err := afero.WriteFile(fs, path, []byte("small file content"), 0o644); err != nil {
 					t.Fatalf("Failed to write test file: %v", err)
 				}
 				return path
@@ -141,7 +138,7 @@ func TestCacheHashFile(t *testing.T) {
 			size:    0,
 			fileFunc: func(fs afero.Fs) string {
 				path := "/empty.txt"
-				if err := afero.WriteFile(fs, path, []byte{}, 0644); err != nil {
+				if err := afero.WriteFile(fs, path, []byte{}, 0o644); err != nil {
 					t.Fatalf("Failed to write empty file: %v", err)
 				}
 				return path
@@ -242,7 +239,7 @@ func TestSpecialCharacters(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cache.hash.Reset()
 			// Write file
-			if err := afero.WriteFile(memFs, name, content, 0644); err != nil {
+			if err := afero.WriteFile(memFs, name, content, 0o644); err != nil {
 				t.Fatalf("Failed to write file %s: %v", name, err)
 			}
 
@@ -278,7 +275,7 @@ func TestBufferPoolReuse(t *testing.T) {
 	// Create a test file
 	filePath := "/test.txt"
 	content := []byte("test content for buffer pool test")
-	if err := afero.WriteFile(memFs, filePath, content, 0644); err != nil {
+	if err := afero.WriteFile(memFs, filePath, content, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 

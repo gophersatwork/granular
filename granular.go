@@ -43,10 +43,10 @@ func New(root string, options ...Option) (*Cache, error) {
 	}
 
 	// Create cache directories if they don't exist
-	if err := cache.fs.MkdirAll(cache.manifestDir(), 0755); err != nil {
+	if err := cache.fs.MkdirAll(cache.manifestDir(), 0o755); err != nil {
 		return nil, err
 	}
-	if err := cache.fs.MkdirAll(cache.objectsDir(), 0755); err != nil {
+	if err := cache.fs.MkdirAll(cache.objectsDir(), 0o755); err != nil {
 		return nil, err
 	}
 

@@ -18,7 +18,7 @@ func TestGet(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-get-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestGet(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestGet(t *testing.T) {
 	// Create an output file
 	outputFilePath := filepath.Join(tempDir, "output.txt")
 	outputContent := []byte("output content")
-	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0o644); err != nil {
 		t.Fatalf("Failed to write output file: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestGet(t *testing.T) {
 			t.Logf("Object directory exists before creation: %v", dirExists)
 		}
 
-		if err := memFs.MkdirAll(objectDir, 0755); err != nil {
+		if err := memFs.MkdirAll(objectDir, 0o755); err != nil {
 			t.Logf("Failed to create object directory: %v", err)
 			return err
 		}
@@ -180,7 +180,7 @@ func TestGet(t *testing.T) {
 			t.Logf("Manifest directory exists before creation: %v", dirExists)
 		}
 
-		if err := memFs.MkdirAll(manifestDir, 0755); err != nil {
+		if err := memFs.MkdirAll(manifestDir, 0o755); err != nil {
 			t.Logf("Failed to create manifest directory: %v", err)
 			return err
 		}
@@ -207,7 +207,7 @@ func TestGet(t *testing.T) {
 		}
 
 		// Write the manifest file
-		if err := afero.WriteFile(memFs, manifestFile, data, 0644); err != nil {
+		if err := afero.WriteFile(memFs, manifestFile, data, 0o644); err != nil {
 			t.Logf("Failed to write manifest file: %v", err)
 			return err
 		}
@@ -307,7 +307,7 @@ func TestStore(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-store-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestStore(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestStore(t *testing.T) {
 	// Create an output file
 	outputFilePath := filepath.Join(tempDir, "output.txt")
 	outputContent := []byte("output content")
-	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0o644); err != nil {
 		t.Fatalf("Failed to write output file: %v", err)
 	}
 
@@ -396,7 +396,7 @@ func TestGetFile(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-getfile-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -409,7 +409,7 @@ func TestGetFile(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -428,7 +428,7 @@ func TestGetFile(t *testing.T) {
 	// Create an output file
 	outputFilePath := filepath.Join(tempDir, "output.txt")
 	outputContent := []byte("output content")
-	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, outputFilePath, outputContent, 0o644); err != nil {
 		t.Fatalf("Failed to write output file: %v", err)
 	}
 
@@ -494,7 +494,7 @@ func TestGetData(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-getdata-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -507,7 +507,7 @@ func TestGetData(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -579,7 +579,7 @@ func TestClear(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-clear-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -592,7 +592,7 @@ func TestClear(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -668,7 +668,7 @@ func TestRemove(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-remove-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -681,7 +681,7 @@ func TestRemove(t *testing.T) {
 	// Create a test file
 	testFilePath := filepath.Join(tempDir, "test.txt")
 	testContent := []byte("test content")
-	if err := afero.WriteFile(memFs, testFilePath, testContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, testFilePath, testContent, 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -752,7 +752,7 @@ func TestCopyFile(t *testing.T) {
 
 	// Create a temporary directory for the test
 	tempDir := "/granular-copyfile-test"
-	if err := memFs.MkdirAll(tempDir, 0755); err != nil {
+	if err := memFs.MkdirAll(tempDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
@@ -765,7 +765,7 @@ func TestCopyFile(t *testing.T) {
 	// Create a source file
 	srcPath := filepath.Join(tempDir, "source.txt")
 	srcContent := []byte("source content")
-	if err := afero.WriteFile(memFs, srcPath, srcContent, 0644); err != nil {
+	if err := afero.WriteFile(memFs, srcPath, srcContent, 0o644); err != nil {
 		t.Fatalf("Failed to write source file: %v", err)
 	}
 
