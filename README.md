@@ -156,7 +156,7 @@ Check it out more ways to use `granular` [here](examples.md).
 
 ## Contributing
 
-Contributions are welcome! Feel free to open a discussion. An easy onboarding for contributor can be found [here](arch.md)
+Contributions are welcome! Feel free to open a discussion. An easy onboarding for a new contributor can be found [here](arch.md)
 
 ## License
 
