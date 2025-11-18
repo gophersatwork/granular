@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package example;
+
+option go_package = "github.com/example/proto/user";
+
+// User represents a user in the system
+message User {
+  int64 id = 1;
+  string username = 2;
+  string email = 3;
+  int64 created_at = 4;
+}
+
+// CreateUserRequest is the request for creating a user
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+}
+
+// CreateUserResponse is the response for creating a user
+message CreateUserResponse {
+  User user = 1;
+  string message = 2;
+}
+
+// UserService provides user management operations
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc GetUser(GetUserRequest) returns (User);
+}
+
+// GetUserRequest is the request for getting a user
+message GetUserRequest {
+  int64 id = 1;
+}

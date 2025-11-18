@@ -1,0 +1,17 @@
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Cache
+.cache/
+
+# Build tools
+build_normal
+build_smart
+
+# Go workspace
+go.work.sum

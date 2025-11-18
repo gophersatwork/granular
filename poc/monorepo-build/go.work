@@ -1,0 +1,10 @@
+go 1.25
+
+use (
+	.
+	./services/admin
+	./services/api
+	./services/worker
+	./shared/models
+	./shared/utils
+)

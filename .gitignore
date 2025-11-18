@@ -1,3 +1,23 @@
 dist/
 .junie
 .idea
+
+# POC examples - keep source, ignore artifacts
+poc/*/bin/
+poc/*/.cache/
+poc/*/.granular-cache/
+poc/*/build_smart
+poc/*/build_normal
+poc/*/run_tests_cached
+poc/*/run_tests_normal
+poc/*/golint-cached
+poc/*/protoc-cached
+poc/*/asset-optimizer
+poc/*/wrapper-template
+poc/*/*.csv
+poc/*/*.json
+poc/*/charts/
+poc/*/sample_output/
+poc/data-pipeline/data_*.csv
+poc/data-pipeline/report.*
+poc/data-pipeline/*.pdf

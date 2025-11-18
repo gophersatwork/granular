@@ -1,0 +1,59 @@
+[tools]
+go = "1.25.4"
+"go:mvdan.cc/gofumpt" = "0.8.0"
+"go:honnef.co/go/tools/cmd/staticcheck" = "0.6.1"
+act = "latest"
+
+[tasks.fmt-check-files]
+description = "List files that need formatting"
+run = "go tool gofumpt -l ."
+
+[tasks.fmt-check-diff]
+description = "Show formatting differences"
+run = "go tool gofumpt -d ."
+
+[tasks.fmt]
+description = "Format all Go files"
+run = "go tool gofumpt -w ."
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run linters (vet and staticcheck)"
+run = """
+go vet ./...
+go tool staticcheck
+"""
+
+[tasks.check]
+description = "Run formatting check, linting, and tests"
+depends = ["fmt-check-diff", "lint", "test"]
+
+[tasks."ci:local"]
+description = "Run full CI pipeline locally using act"
+run = "./scripts/run-ci-local.sh"
+
+[tasks."ci:test"]
+description = "Run test job locally"
+run = "./scripts/run-ci-local.sh -j test"
+
+[tasks."ci:verbose"]
+description = "Run CI locally with verbose output"
+run = "./scripts/run-ci-local.sh -v"
+
+[tasks."ci:list"]
+description = "List available CI jobs"
+run = "./scripts/run-ci-local.sh -l"
+
+[tasks."ci:pr"]
+description = "Run CI as pull_request event"
+run = "./scripts/run-ci-local.sh -e pull_request"
+
+[tasks."ci:dry-run"]
+description = "Show what would run without executing"
+run = "./scripts/run-ci-local.sh -n"
+
+[settings]
+experimental = true

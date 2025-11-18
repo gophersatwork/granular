@@ -1,0 +1,16 @@
+# Compiled binaries
+golint-cached/golint-cached
+protoc-cached/protoc-cached
+asset-optimizer/asset-optimizer
+wrapper-template/wrapper-template
+
+# Cache directories
+.granular-cache
+*/.granular-cache
+
+# Generated files
+test-project/proto-files/generated/
+test-project/assets-optimized/
+
+# Go module files
+*/go.sum

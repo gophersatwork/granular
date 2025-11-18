@@ -18,16 +18,6 @@ var bufferPool = sync.Pool{
 	},
 }
 
-// hashInput hashes the content of an Input using the Cache's hashing methods.
-// This is a helper method to be used by computeKeyHash.
-func (c *Cache) hashInput(input Input) error {
-	err := input.Hash(c.hash)
-	if err != nil {
-		return fmt.Errorf("failed to hash input %s: %w", input.String(), err)
-	}
-	return nil
-}
-
 // hashFile hashes the content from a reader using the provided hash function.
 func hashFile(content io.Reader, h hash.Hash) error {
 	bufPtr := bufferPool.Get().(*[]byte)

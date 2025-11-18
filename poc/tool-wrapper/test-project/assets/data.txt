@@ -1,0 +1,13 @@
+Sample data file for testing asset optimization.
+
+This file contains multiple lines of text that can be optimized
+by removing extra whitespace and empty lines.
+
+
+Lines with extra spacing will be compressed.
+
+
+
+Multiple consecutive empty lines will be reduced.
+
+The optimizer should preserve the content while reducing file size.

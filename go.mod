@@ -1,6 +1,6 @@
 module github.com/gophersatwork/granular
 
-go 1.24
+go 1.25
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
