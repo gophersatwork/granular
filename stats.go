@@ -77,11 +77,17 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 	count := 0
 	cutoff := c.now().Add(-olderThan)
 
-	var toRemove []string
+	type entryToRemove struct {
+		keyHash string
+		size    int64
+	}
+	var toRemove []entryToRemove
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
 		if m.CreatedAt.Before(cutoff) {
-			toRemove = append(toRemove, keyHash)
+			objectDir := c.objectPath(keyHash)
+			size, _ := c.dirSize(objectDir)
+			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: size})
 		}
 		return nil
 	})
@@ -90,10 +96,11 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 	}
 
 	// Remove entries
-	for _, keyHash := range toRemove {
-		if err := c.removeByHash(keyHash); err != nil {
-			return count, fmt.Errorf("failed to remove entry %s: %w", keyHash, err)
+	for _, entry := range toRemove {
+		if err := c.removeByHash(entry.keyHash); err != nil {
+			return count, fmt.Errorf("failed to remove entry %s: %w", entry.keyHash, err)
 		}
+		c.metrics.evict(entry.keyHash, entry.size, EvictReasonExpired)
 		count++
 	}
 
@@ -109,11 +116,17 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	count := 0
 	cutoff := c.now().Add(-notAccessedSince)
 
-	var toRemove []string
+	type entryToRemove struct {
+		keyHash string
+		size    int64
+	}
+	var toRemove []entryToRemove
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
 		if m.AccessedAt.Before(cutoff) {
-			toRemove = append(toRemove, keyHash)
+			objectDir := c.objectPath(keyHash)
+			size, _ := c.dirSize(objectDir)
+			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: size})
 		}
 		return nil
 	})
@@ -122,10 +135,11 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	}
 
 	// Remove entries
-	for _, keyHash := range toRemove {
-		if err := c.removeByHash(keyHash); err != nil {
-			return count, fmt.Errorf("failed to remove entry %s: %w", keyHash, err)
+	for _, entry := range toRemove {
+		if err := c.removeByHash(entry.keyHash); err != nil {
+			return count, fmt.Errorf("failed to remove entry %s: %w", entry.keyHash, err)
 		}
+		c.metrics.evict(entry.keyHash, entry.size, EvictReasonExpired)
 		count++
 	}
 

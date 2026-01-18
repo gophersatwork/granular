@@ -93,3 +93,23 @@ func WithMaxSize(bytes int64) Option {
 		c.maxSize = bytes
 	}
 }
+
+// WithMetrics sets the metrics hooks for observability.
+// The hooks are called for cache events like hits, misses, puts, and evictions.
+// All hooks are optional - nil hooks are ignored.
+//
+// Example:
+//
+//	cache, err := granular.Open(".cache", granular.WithMetrics(&granular.MetricsHooks{
+//		OnHit: func(keyHash string, size int64) {
+//			hitCounter.Inc()
+//		},
+//		OnMiss: func(keyHash string) {
+//			missCounter.Inc()
+//		},
+//	}))
+func WithMetrics(hooks *MetricsHooks) Option {
+	return func(c *Cache) {
+		c.metrics = hooks
+	}
+}
