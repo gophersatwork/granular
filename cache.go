@@ -22,8 +22,9 @@ type Cache struct {
 	mu               sync.RWMutex // Global lock for operations needing consistency (Clear, Stats, Prune, Entries)
 	keyLocks         *keyLocks    // Per-key locking for concurrent access to different keys
 	fs               afero.Fs
-	accumulateErrors bool  // If true, accumulate all validation errors; if false, fail-fast
-	maxSize          int64 // Maximum cache size in bytes; 0 means no limit
+	accumulateErrors bool            // If true, accumulate all validation errors; if false, fail-fast
+	maxSize          int64           // Maximum cache size in bytes; 0 means no limit
+	compression      CompressionType // Compression algorithm for stored data
 }
 
 // HashFunc defines a function that creates a new hash.Hash instance.
@@ -148,14 +149,15 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	// Build result with lazy-loading for data
 	// m.OutputData stores paths to .dat files, which are loaded on demand
 	result := &Result{
-		keyHash:    keyHash,
-		cache:      c,
-		files:      m.OutputFiles,
-		dataPaths:  m.OutputData, // Paths to .dat files for lazy loading
-		dataCache:  nil,          // Initialized on first data access
-		metadata:   m.OutputMeta,
-		createdAt:  m.CreatedAt,
-		accessedAt: m.AccessedAt,
+		keyHash:     keyHash,
+		cache:       c,
+		files:       m.OutputFiles,
+		dataPaths:   m.OutputData, // Paths to .dat files for lazy loading
+		dataCache:   nil,          // Initialized on first data access
+		metadata:    m.OutputMeta,
+		compression: m.Compression,
+		createdAt:   m.CreatedAt,
+		accessedAt:  m.AccessedAt,
 	}
 
 	// Initialize maps if nil
