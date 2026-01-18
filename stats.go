@@ -231,3 +231,82 @@ func (c *Cache) removeByHash(keyHash string) error {
 
 	return nil
 }
+
+// GC performs garbage collection on the cache, removing orphaned object directories
+// that have no corresponding manifest. This can happen if Put() succeeds writing
+// objects but fails writing the manifest (crash, disk full, etc.).
+// Returns the number of orphaned directories removed and total bytes reclaimed.
+func (c *Cache) GC() (int, int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Step 1: Collect all valid object directory hashes from manifests
+	validHashes := make(map[string]bool)
+	err := c.walkManifests(func(keyHash string, m *manifest) error {
+		validHashes[keyHash] = true
+		return nil
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to walk manifests: %w", err)
+	}
+
+	// Step 2: Walk the objects directory and find orphans
+	objectsDir := c.objectsDir()
+	var filesRemoved int
+	var bytesReclaimed int64
+
+	// Objects are stored as: objects/{first2chars}/{fullhash}/files
+	// Walk the sharded directories
+	err = afero.Walk(c.fs, objectsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			// Skip errors (e.g., permission denied)
+			return nil
+		}
+
+		// We're looking for hash directories (the ones containing actual files)
+		// Path structure: objects/ab/abcd1234.../
+		if !info.IsDir() {
+			return nil
+		}
+
+		// Extract hash from path
+		hash := extractHashFromPath(path, objectsDir)
+		if hash == "" {
+			return nil // Not a hash directory (might be shard directory or root)
+		}
+
+		// Check if this hash has a corresponding manifest
+		if !validHashes[hash] {
+			// Orphan! Remove it
+			size, _ := c.dirSize(path)
+			if removeErr := c.fs.RemoveAll(path); removeErr == nil {
+				filesRemoved++
+				bytesReclaimed += size
+			}
+			return filepath.SkipDir // Don't descend into removed directory
+		}
+
+		return filepath.SkipDir // Don't descend into valid directories either
+	})
+	if err != nil {
+		return filesRemoved, bytesReclaimed, fmt.Errorf("failed to walk objects directory: %w", err)
+	}
+
+	return filesRemoved, bytesReclaimed, nil
+}
+
+// extractHashFromPath extracts the key hash from an object directory path.
+// Path format: .cache/objects/ab/abcdef123456...
+// Returns empty string if the path is not at the correct depth (shard/hash).
+func extractHashFromPath(path, objectsDir string) string {
+	rel, err := filepath.Rel(objectsDir, path)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 {
+		return "" // Not at the right depth (shard directory or too deep)
+	}
+	// parts[0] is the shard (e.g., "ab"), parts[1] is the full hash
+	return parts[1]
+}

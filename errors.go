@@ -14,6 +14,11 @@ var (
 	// ErrCacheCorrupted is returned when a cache entry fails integrity verification.
 	// This indicates the cached data has been modified or corrupted since it was stored.
 	ErrCacheCorrupted = errors.New("cache entry corrupted")
+
+	// ErrHashAlgoMismatch is returned when a cache entry was created with a different
+	// hash algorithm than the one currently configured. The entry is treated as a miss
+	// since the key hash would be different.
+	ErrHashAlgoMismatch = errors.New("hash algorithm mismatch")
 )
 
 // ValidationError represents one or more validation errors that occurred

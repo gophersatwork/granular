@@ -19,11 +19,8 @@ func TestWithHashFunc(t *testing.T) {
 	}
 
 	// Create cache with custom hash function (FNV)
-	customHashFunc := func() hash.Hash {
-		return fnv.New64a()
-	}
-
-	cache, err := Open(".cache", WithFs(fs), WithHashFunc(customHashFunc))
+	customHashFunc := func() hash.Hash { return fnv.New64a() }
+	cache, err := Open(".cache", WithFs(fs), WithHashFunc("fnv64a", customHashFunc))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -80,11 +77,8 @@ func TestWithHashFunc_Persistence(t *testing.T) {
 		t.FailNow()
 	}
 
-	customHashFunc := func() hash.Hash {
-		return fnv.New64a()
-	}
-
-	cache, err := Open(".cache", WithFs(fs), WithHashFunc(customHashFunc))
+	customHashFunc := func() hash.Hash { return fnv.New64a() }
+	cache, err := Open(".cache", WithFs(fs), WithHashFunc("fnv64a", customHashFunc))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -436,7 +430,7 @@ func TestMultipleOptions(t *testing.T) {
 
 	cache, err := Open(".cache",
 		WithFs(fs),
-		WithHashFunc(customHashFunc),
+		WithHashFunc("fnv64a", customHashFunc),
 		WithNowFunc(customNowFunc),
 		WithAccumulateErrors(),
 	)
@@ -541,7 +535,7 @@ func TestWithHashFunc_NilFunction(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
 	// This test verifies behavior when hashFunc is called
-	cache, err := Open(".cache", WithFs(fs), WithHashFunc(nil))
+	cache, err := Open(".cache", WithFs(fs), WithHashFunc("nil", nil))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -595,6 +589,9 @@ func TestDefaultOptions(t *testing.T) {
 	if cache.accumulateErrors {
 		t.Error("Default should be fail-fast (accumulateErrors=false)")
 	}
+	if cache.maxSize != 0 {
+		t.Error("Default maxSize should be 0 (no limit)")
+	}
 
 	// Verify hash function is xxHash (default)
 	h := cache.hashFunc()
@@ -609,5 +606,300 @@ func TestDefaultOptions(t *testing.T) {
 	}
 	if time.Since(now) > 1*time.Second {
 		t.Error("Default nowFunc should return current time")
+	}
+}
+
+// TestWithMaxSize tests the max size option
+func TestWithMaxSize(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	maxSize := int64(10 * 1024) // 10KB
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(maxSize))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Verify option was applied
+	if cache.maxSize != maxSize {
+		t.Errorf("maxSize = %d, want %d", cache.maxSize, maxSize)
+	}
+	if cache.MaxSize() != maxSize {
+		t.Errorf("MaxSize() = %d, want %d", cache.MaxSize(), maxSize)
+	}
+}
+
+// TestWithMaxSize_ZeroMeansNoLimit tests that zero maxSize means no limit
+func TestWithMaxSize_ZeroMeansNoLimit(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(0))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Create a test file
+	err = afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Should be able to store without eviction
+	key := cache.Key().File("test.txt").Build()
+	err = cache.Put(key).Bytes("data", []byte("some data")).Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify entry exists
+	if !cache.Has(key) {
+		t.Error("Entry should exist")
+	}
+}
+
+// TestWithMaxSize_NegativeMeansNoLimit tests that negative maxSize means no limit
+func TestWithMaxSize_NegativeMeansNoLimit(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(-1))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Create a test file
+	err = afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Should be able to store without eviction
+	key := cache.Key().File("test.txt").Build()
+	err = cache.Put(key).Bytes("data", []byte("some data")).Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify entry exists
+	if !cache.Has(key) {
+		t.Error("Entry should exist")
+	}
+}
+
+// TestWithMaxSize_Eviction tests that LRU eviction works
+func TestWithMaxSize_Eviction(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	// Use a small max size to trigger eviction
+	// Each entry stores 500 bytes of data in the objects directory
+	// Max size of 1200 bytes fits 2 entries (1000 bytes) with some headroom
+	// Adding a third entry (500 bytes) will exceed the limit and trigger eviction
+	maxSize := int64(1200)
+
+	// Use incrementing time to ensure predictable LRU ordering
+	callCount := 0
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	customNowFunc := func() time.Time {
+		result := baseTime.Add(time.Duration(callCount) * time.Hour)
+		callCount++
+		return result
+	}
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(maxSize), WithNowFunc(customNowFunc))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Create test files
+	err = afero.WriteFile(fs, "test1.txt", []byte("content1"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+	err = afero.WriteFile(fs, "test2.txt", []byte("content2"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+	err = afero.WriteFile(fs, "test3.txt", []byte("content3"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Store first entry (500 bytes of data)
+	key1 := cache.Key().File("test1.txt").Build()
+	err = cache.Put(key1).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 1 failed: %v", err)
+	}
+
+	// Store second entry (500 bytes)
+	key2 := cache.Key().File("test2.txt").Build()
+	err = cache.Put(key2).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 2 failed: %v", err)
+	}
+
+	// At this point, cache has 1000 bytes used
+	// Adding a third entry (500 bytes) should trigger eviction of the oldest (key1)
+	// because 1000 + 500 = 1500 > 1200 max
+	key3 := cache.Key().File("test3.txt").Build()
+	err = cache.Put(key3).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 3 failed: %v", err)
+	}
+
+	// key1 (oldest) should have been evicted
+	if cache.Has(key1) {
+		t.Error("key1 should have been evicted (oldest entry)")
+	}
+
+	// key2 and key3 should still exist
+	// (Note: key2 might also be evicted if 3 entries don't fit, which is OK)
+	if !cache.Has(key3) {
+		t.Error("key3 should exist (newest entry)")
+	}
+}
+
+// TestWithMaxSize_LRUOrder tests that least recently accessed is evicted first
+func TestWithMaxSize_LRUOrder(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	// Max size that fits only 2 entries of 500 bytes each (1000 bytes total)
+	// Adding a third entry (500 bytes) will trigger eviction
+	// Note: Stats.TotalSize only counts object directory sizes, not manifest files
+	maxSize := int64(1200)
+
+	// Use incrementing time
+	callCount := 0
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	customNowFunc := func() time.Time {
+		result := baseTime.Add(time.Duration(callCount) * time.Hour)
+		callCount++
+		return result
+	}
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(maxSize), WithNowFunc(customNowFunc))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Create test files
+	err = afero.WriteFile(fs, "test1.txt", []byte("content1"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+	err = afero.WriteFile(fs, "test2.txt", []byte("content2"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+	err = afero.WriteFile(fs, "test3.txt", []byte("content3"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Store entries with 500 bytes data each
+	key1 := cache.Key().File("test1.txt").Build()
+	err = cache.Put(key1).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 1 failed: %v", err)
+	}
+
+	key2 := cache.Key().File("test2.txt").Build()
+	err = cache.Put(key2).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 2 failed: %v", err)
+	}
+
+	// Access key1 to update its AccessedAt (making key2 the least recently accessed)
+	_, err = cache.Get(key1)
+	if err != nil {
+		t.Fatalf("Get key1 failed: %v", err)
+	}
+
+	// Now add a third entry that should trigger eviction
+	key3 := cache.Key().File("test3.txt").Build()
+	err = cache.Put(key3).Bytes("data", make([]byte, 500)).Commit()
+	if err != nil {
+		t.Fatalf("Commit 3 failed: %v", err)
+	}
+
+	// key2 should be evicted (least recently accessed) since key1 was accessed more recently
+	// key1 was accessed after key2 was created, so key2 is the LRU candidate
+	if cache.Has(key2) {
+		t.Error("key2 should have been evicted (least recently accessed)")
+	}
+
+	// key1 and key3 should exist
+	if !cache.Has(key1) {
+		t.Error("key1 should exist (was recently accessed)")
+	}
+	if !cache.Has(key3) {
+		t.Error("key3 should exist (newest entry)")
+	}
+}
+
+// TestWithMaxSize_EntrySizeLargerThanMax tests adding an entry larger than max size
+func TestWithMaxSize_EntrySizeLargerThanMax(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	// Very small max size (1KB)
+	maxSize := int64(1024)
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(maxSize))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func(cache *Cache) {
+		err := cache.Close()
+		if err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	}(cache)
+
+	// Create test file
+	err = afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Try to store an entry larger than max size (2KB data)
+	key := cache.Key().File("test.txt").Build()
+	err = cache.Put(key).Bytes("data", make([]byte, 2048)).Commit()
+	// The commit should still succeed, even if the entry exceeds max size
+	// (eviction will clear everything, but the new entry will still be stored)
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Entry should exist (even though it exceeds max size)
+	if !cache.Has(key) {
+		t.Error("Entry should exist even if it exceeds max size")
 	}
 }

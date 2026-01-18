@@ -94,6 +94,22 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("failed to compute key hash: %w", err)
 	}
 
+	// Estimate required space for this entry (before acquiring locks)
+	requiredSpace, err := wb.estimateSize()
+	if err != nil {
+		return fmt.Errorf("failed to estimate entry size: %w", err)
+	}
+
+	// If max size is set, perform eviction under global lock
+	if wb.cache.maxSize > 0 {
+		wb.cache.mu.Lock()
+		if err := wb.cache.evictIfNeeded(requiredSpace); err != nil {
+			wb.cache.mu.Unlock()
+			return fmt.Errorf("failed to evict entries: %w", err)
+		}
+		wb.cache.mu.Unlock()
+	}
+
 	// Use per-key lock for concurrent writes to different keys
 	wb.cache.keyLocks.lockKey(keyHash)
 	defer wb.cache.keyLocks.unlockKey(keyHash)
@@ -152,6 +168,8 @@ func (wb *WriteBuilder) Commit() error {
 
 	// Create and save manifest
 	manifest := &manifest{
+		Version:     1,                     // Current manifest format version
+		HashAlgo:    wb.cache.hashAlgoName, // Hash algorithm for compatibility checking
 		KeyHash:     keyHash,
 		InputDescs:  inputDescs,
 		ExtraData:   wb.key.extras,
@@ -213,4 +231,27 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// estimateSize calculates the approximate size of the data to be written.
+// This includes all files and byte data that will be stored in the objects directory.
+// Note: This matches what dirSize() measures (only object directory contents).
+func (wb *WriteBuilder) estimateSize() (int64, error) {
+	var totalSize int64
+
+	// Sum up file sizes
+	for _, srcPath := range wb.files {
+		info, err := wb.cache.fs.Stat(srcPath)
+		if err != nil {
+			return 0, fmt.Errorf("failed to stat file %s: %w", srcPath, err)
+		}
+		totalSize += info.Size()
+	}
+
+	// Sum up byte data sizes
+	for _, data := range wb.data {
+		totalSize += int64(len(data))
+	}
+
+	return totalSize, nil
 }

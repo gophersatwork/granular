@@ -812,3 +812,158 @@ func TestKeyBuilderHash(t *testing.T) {
 		t.Fatal("Expected different hashes for different builders")
 	}
 }
+
+// TestCacheGC tests the GC() method for cleaning orphaned objects.
+func TestCacheGC(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-gc-test")
+
+	// Create a valid cache entry first
+	testFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, testFile, []byte("test data"))
+
+	key := cache.Key().File(testFile).String("version", "1").Build()
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("output data"))
+
+	err := cache.Put(key).
+		File("out", outputFile).
+		Meta("key", "value").
+		Commit()
+	assertNoError(t, err, "Put valid entry")
+
+	// Verify valid entry exists
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get valid entry before GC")
+
+	// Create an orphan: write directly to objects directory without a manifest
+	orphanHash := "deadbeef12345678"
+	orphanShardDir := filepath.Join(tempDir, "objects", orphanHash[:2])
+	orphanDir := filepath.Join(orphanShardDir, orphanHash)
+	createTestDir(t, memFs, orphanDir)
+
+	orphanFile := filepath.Join(orphanDir, "orphan.txt")
+	orphanContent := []byte("orphaned content that should be cleaned up")
+	createTestFile(t, memFs, orphanFile, orphanContent)
+
+	// Verify orphan exists
+	exists, err := afero.Exists(memFs, orphanDir)
+	assertNoError(t, err, "check orphan exists")
+	if !exists {
+		t.Fatal("Expected orphan directory to exist before GC")
+	}
+
+	// Run GC
+	filesRemoved, bytesReclaimed, err := cache.GC()
+	assertNoError(t, err, "GC")
+
+	// Verify GC cleaned up orphan
+	if filesRemoved != 1 {
+		t.Fatalf("Expected 1 orphan removed, got %d", filesRemoved)
+	}
+	if bytesReclaimed == 0 {
+		t.Fatal("Expected some bytes to be reclaimed")
+	}
+
+	// Verify orphan is gone
+	exists, err = afero.Exists(memFs, orphanDir)
+	assertNoError(t, err, "check orphan after GC")
+	if exists {
+		t.Fatal("Expected orphan directory to be removed after GC")
+	}
+
+	// Verify valid entry still exists
+	result, err = cache.Get(key)
+	assertCacheHit(t, result, err, "Get valid entry after GC")
+}
+
+// TestCacheGCNoOrphans tests GC when there are no orphans to clean.
+func TestCacheGCNoOrphans(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-gc-no-orphans-test")
+
+	// Create a valid cache entry
+	testFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, testFile, []byte("test data"))
+
+	key := cache.Key().File(testFile).Build()
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("output"))
+
+	err := cache.Put(key).File("out", outputFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Run GC when there are no orphans
+	filesRemoved, bytesReclaimed, err := cache.GC()
+	assertNoError(t, err, "GC")
+
+	if filesRemoved != 0 {
+		t.Fatalf("Expected 0 files removed, got %d", filesRemoved)
+	}
+	if bytesReclaimed != 0 {
+		t.Fatalf("Expected 0 bytes reclaimed, got %d", bytesReclaimed)
+	}
+
+	// Verify valid entry still exists
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get after GC")
+}
+
+// TestCacheGCEmptyCache tests GC on an empty cache.
+func TestCacheGCEmptyCache(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-gc-empty-test")
+
+	// Run GC on empty cache
+	filesRemoved, bytesReclaimed, err := cache.GC()
+	assertNoError(t, err, "GC on empty cache")
+
+	if filesRemoved != 0 {
+		t.Fatalf("Expected 0 files removed, got %d", filesRemoved)
+	}
+	if bytesReclaimed != 0 {
+		t.Fatalf("Expected 0 bytes reclaimed, got %d", bytesReclaimed)
+	}
+}
+
+// TestCacheGCMultipleOrphans tests GC with multiple orphaned directories.
+func TestCacheGCMultipleOrphans(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-gc-multi-orphans-test")
+
+	// Create multiple orphans in different shards
+	orphans := []string{
+		"aaaa111122223333",
+		"bbbb444455556666",
+		"cccc777788889999",
+	}
+
+	var expectedBytes int64
+	for _, orphanHash := range orphans {
+		orphanShardDir := filepath.Join(tempDir, "objects", orphanHash[:2])
+		orphanDir := filepath.Join(orphanShardDir, orphanHash)
+		createTestDir(t, memFs, orphanDir)
+
+		orphanFile := filepath.Join(orphanDir, "data.txt")
+		content := []byte("orphan " + orphanHash)
+		createTestFile(t, memFs, orphanFile, content)
+		expectedBytes += int64(len(content))
+	}
+
+	// Run GC
+	filesRemoved, bytesReclaimed, err := cache.GC()
+	assertNoError(t, err, "GC")
+
+	if filesRemoved != 3 {
+		t.Fatalf("Expected 3 orphans removed, got %d", filesRemoved)
+	}
+	if bytesReclaimed != expectedBytes {
+		t.Fatalf("Expected %d bytes reclaimed, got %d", expectedBytes, bytesReclaimed)
+	}
+
+	// Verify all orphans are gone
+	for _, orphanHash := range orphans {
+		orphanDir := filepath.Join(tempDir, "objects", orphanHash[:2], orphanHash)
+		exists, err := afero.Exists(memFs, orphanDir)
+		assertNoError(t, err, "check orphan "+orphanHash)
+		if exists {
+			t.Fatalf("Expected orphan %s to be removed", orphanHash)
+		}
+	}
+}

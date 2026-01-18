@@ -1,8 +1,15 @@
 package granular
 
 import (
+	"crypto/sha256"
+	"hash"
+
+	"github.com/cespare/xxhash/v2"
 	"github.com/spf13/afero"
 )
+
+// DefaultHashAlgoName is the name of the default hash algorithm (xxhash64).
+const DefaultHashAlgoName = "xxhash64"
 
 // WithFs sets a custom filesystem for the cache.
 // This is primarily useful for testing with in-memory filesystems.
@@ -16,15 +23,33 @@ func WithFs(fs afero.Fs) Option {
 	}
 }
 
-// WithHashFunc sets a custom hash function for the cache.
+// WithHashFunc sets a custom hash function for the cache with a named algorithm.
+// The name is stored in the manifest to detect algorithm changes.
 // The default is xxHash64, which provides excellent performance.
-// Only change this if you have specific requirements.
 //
-// Note: Changing the hash function will invalidate existing cache entries.
-func WithHashFunc(hashFunc HashFunc) Option {
+// Note: Changing the hash function will cause existing cache entries to be
+// treated as misses (ErrHashAlgoMismatch) since the key hash would differ.
+//
+// Example:
+//
+//	cache, err := granular.Open(".cache", granular.WithHashFunc("fnv128", fnv.New128))
+func WithHashFunc(name string, hashFunc func() hash.Hash) Option {
 	return func(c *Cache) {
 		c.hashFunc = hashFunc
+		c.hashAlgoName = name
 	}
+}
+
+// WithXXHash configures the cache to use xxHash64 (the default).
+// xxHash64 provides excellent performance for cache key hashing.
+func WithXXHash() Option {
+	return WithHashFunc("xxhash64", func() hash.Hash { return xxhash.New() })
+}
+
+// WithSHA256 configures the cache to use SHA-256 for hashing.
+// SHA-256 is slower than xxHash64 but provides cryptographic properties.
+func WithSHA256() Option {
+	return WithHashFunc("sha256", sha256.New)
 }
 
 // WithNowFunc sets a custom time function for the cache.
@@ -50,5 +75,21 @@ func WithNowFunc(nowFunc NowFunc) Option {
 func WithAccumulateErrors() Option {
 	return func(c *Cache) {
 		c.accumulateErrors = true
+	}
+}
+
+// WithMaxSize sets the maximum total size of the cache in bytes.
+// When the cache exceeds this size, least-recently-accessed entries
+// are evicted to make room for new entries.
+//
+// A value of 0 or negative means no size limit (default behavior).
+//
+// Example:
+//
+//	// Create a cache with a 1GB size limit
+//	cache, err := granular.Open(".cache", granular.WithMaxSize(1<<30))
+func WithMaxSize(bytes int64) Option {
+	return func(c *Cache) {
+		c.maxSize = bytes
 	}
 }
