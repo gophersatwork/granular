@@ -710,10 +710,10 @@ func TestResultTiming(t *testing.T) {
 			createdTime, result.CreatedAt())
 	}
 
-	// Verify AccessedAt (equals CreatedAt since Get() doesn't update it)
-	if !result.AccessedAt().Equal(createdTime) {
+	// Verify AccessedAt (updated to current time when Get() is called)
+	if !result.AccessedAt().Equal(now) {
 		t.Fatalf("AccessedAt mismatch:\nExpected: %v\nActual: %v",
-			createdTime, result.AccessedAt())
+			now, result.AccessedAt())
 	}
 
 	// Verify Age() (time since creation)

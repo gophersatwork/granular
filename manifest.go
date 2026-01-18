@@ -1,16 +1,55 @@
 package granular
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
 
 	"github.com/spf13/afero"
 )
+
+// Ensure os.FileMode is used (for atomicWriteFile parameter type)
+var _ os.FileMode
+
+// randomSuffix generates a random suffix for temporary files.
+// Uses crypto/rand for unpredictable suffixes to avoid collisions.
+func randomSuffix() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to time-based suffix if crypto/rand fails
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// atomicWriteFile writes data to a file atomically using a temp file and rename.
+// This ensures that the file is either fully written or not present at all,
+// preventing corruption from crashes during write.
+func atomicWriteFile(fs afero.Fs, path string, data []byte, perm os.FileMode) error {
+	tmpPath := path + ".tmp." + randomSuffix()
+
+	// Write to temp file
+	if err := afero.WriteFile(fs, tmpPath, data, perm); err != nil {
+		// Attempt cleanup on error
+		_ = fs.Remove(tmpPath)
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	// Atomic rename to final path
+	if err := fs.Rename(tmpPath, path); err != nil {
+		// Cleanup temp file on rename failure
+		_ = fs.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
 
 // manifest represents a cache manifest file (internal use only).
 // It contains metadata about a cached computation.
@@ -22,7 +61,7 @@ type manifest struct {
 
 	// Result information (multi-file support)
 	OutputFiles map[string]string `json:"outputs"`    // name -> cached file path
-	OutputData  map[string][]byte `json:"outputData"` // name -> bytes
+	OutputData  map[string]string `json:"outputData"` // name -> path to .dat file
 	OutputMeta  map[string]string `json:"outputMeta"` // metadata key-value pairs
 	OutputHash  string            `json:"outputHash"` // Hash of outputs
 
@@ -32,6 +71,7 @@ type manifest struct {
 }
 
 // saveManifest saves a manifest to disk using the cache's filesystem.
+// Uses atomic write pattern to prevent corruption from crashes during write.
 func (c *Cache) saveManifest(m *manifest) error {
 	// Create the manifest directory if it doesn't exist
 	manifestDir := filepath.Dir(c.manifestPath(m.KeyHash))
@@ -45,8 +85,8 @@ func (c *Cache) saveManifest(m *manifest) error {
 		return fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	// Write the manifest file
-	if err := afero.WriteFile(c.fs, c.manifestPath(m.KeyHash), data, 0o644); err != nil {
+	// Write atomically using temp file + rename
+	if err := atomicWriteFile(c.fs, c.manifestPath(m.KeyHash), data, 0o644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 
@@ -163,4 +203,39 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 // This is a helper function to avoid importing sort in multiple places.
 func sortStrings(s []string) {
 	sort.Strings(s)
+}
+
+// verifyOutputHash recomputes the output hash from cached files and data,
+// then compares it to the stored hash in the manifest.
+// Returns ErrCacheCorrupted if the hashes do not match.
+func (c *Cache) verifyOutputHash(m *manifest) error {
+	// Extract cached file paths from the manifest
+	// m.OutputFiles maps logical names to cached file paths
+	cachedPaths := make([]string, 0, len(m.OutputFiles))
+	for _, cachedPath := range m.OutputFiles {
+		cachedPaths = append(cachedPaths, cachedPath)
+	}
+
+	// Load data from .dat files for hash verification
+	// m.OutputData now stores paths to .dat files, not raw bytes
+	outputData := make(map[string][]byte, len(m.OutputData))
+	for name, dataPath := range m.OutputData {
+		data, err := afero.ReadFile(c.fs, dataPath)
+		if err != nil {
+			return fmt.Errorf("failed to read data file %s: %w", dataPath, err)
+		}
+		outputData[name] = data
+	}
+
+	// Compute hash from the cached files and loaded data
+	computedHash, err := c.computeOutputHash(cachedPaths, outputData, m.OutputMeta)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for verification: %w", err)
+	}
+
+	if computedHash != m.OutputHash {
+		return ErrCacheCorrupted
+	}
+
+	return nil
 }

@@ -71,7 +71,7 @@ func (g globInput) hash(h hash.Hash, fs afero.Fs) error {
 	sort.Strings(matches)
 
 	// Hash count of matches
-	fmt.Fprintf(h, "%d", len(matches))
+	_, _ = fmt.Fprintf(h, "%d", len(matches))
 
 	// Hash each matched file
 	for _, match := range matches {
@@ -130,7 +130,7 @@ func (d dirInput) hash(h hash.Hash, fs afero.Fs) error {
 	sort.Strings(files)
 
 	// Hash count of files
-	fmt.Fprintf(h, "%d", len(files))
+	_, _ = fmt.Fprintf(h, "%d", len(files))
 
 	// Hash each file
 	for _, file := range files {
@@ -169,22 +169,6 @@ func (b bytesInput) String() string {
 		return fmt.Sprintf("bytes:%s", b.name)
 	}
 	return fmt.Sprintf("bytes:%d", len(b.data))
-}
-
-// stringInput represents a key-value string input.
-type stringInput struct {
-	key   string
-	value string
-}
-
-func (s stringInput) hash(h hash.Hash, fs afero.Fs) error {
-	h.Write([]byte(s.key))
-	h.Write([]byte(s.value))
-	return nil
-}
-
-func (s stringInput) String() string {
-	return fmt.Sprintf("%s=%s", s.key, s.value)
 }
 
 // File adds a file input to the cache key.
@@ -311,22 +295,22 @@ func (kb *KeyBuilder) Build() Key {
 // Returns empty string if there are validation errors.
 func (kb *KeyBuilder) Hash() string {
 	key := kb.Build()
-	hash, err := key.computeHash()
+	compHash, err := key.computeHash()
 	if err != nil {
 		return ""
 	}
-	return hash
+	return compHash
 }
 
 // Hash returns the hash of this key as a hex string.
 // This is useful for debugging and logging.
 // Returns empty string if there are validation errors.
 func (k Key) Hash() string {
-	hash, err := k.computeHash()
+	compHash, err := k.computeHash()
 	if err != nil {
 		return ""
 	}
-	return hash
+	return compHash
 }
 
 // computeHash calculates the hash for this key.
@@ -340,10 +324,10 @@ func (k Key) computeHash() (string, error) {
 	h := k.cache.newHash()
 
 	// Hash all inputs
-	for _, input := range k.inputs {
+	for _, hi := range k.inputs {
 		// Write input string representation for better determinism
-		h.Write([]byte(input.String()))
-		if err := input.hash(h, k.cache.fs); err != nil {
+		h.Write([]byte(hi.String()))
+		if err := hi.hash(h, k.cache.fs); err != nil {
 			return "", err
 		}
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -135,8 +136,11 @@ func (b *SmartBuilder) buildPackage(pkg PackageInfo) (BuildResult, error) {
 	fmt.Printf("Building %s... ", pkg.Name)
 
 	// Check cache
-	cached := b.cache.Get(key)
-	if cached != nil {
+	cached, err := b.cache.Get(key)
+	if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+		return result, fmt.Errorf("failed to get from cache: %w", err)
+	}
+	if err == nil && cached != nil {
 		// Cache hit!
 		duration := time.Since(start)
 

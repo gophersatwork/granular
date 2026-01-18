@@ -10,6 +10,10 @@ import (
 var (
 	// ErrCacheMiss is returned when a cache entry is not found.
 	ErrCacheMiss = errors.New("cache miss")
+
+	// ErrCacheCorrupted is returned when a cache entry fails integrity verification.
+	// This indicates the cached data has been modified or corrupted since it was stored.
+	ErrCacheCorrupted = errors.New("cache entry corrupted")
 )
 
 // ValidationError represents one or more validation errors that occurred
@@ -30,7 +34,7 @@ func (ve *ValidationError) Error() string {
 	var buf strings.Builder
 	buf.WriteString(fmt.Sprintf("validation failed with %d errors:\n", len(ve.Errors)))
 	for i, err := range ve.Errors {
-		fmt.Fprintf(&buf, "  %d. %v\n", i+1, err)
+		_, _ = fmt.Fprintf(&buf, "  %d. %v\n", i+1, err)
 	}
 	return buf.String()
 }

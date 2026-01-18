@@ -20,4 +20,4 @@ poc/*/charts/
 poc/*/sample_output/
 poc/data-pipeline/data_*.csv
 poc/data-pipeline/report.*
-poc/data-pipeline/*.pdf
+poc/data-pipeline/*.pdfcoverage.out

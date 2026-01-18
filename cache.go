@@ -17,7 +17,8 @@ type Cache struct {
 	root             string
 	hashFunc         HashFunc
 	nowFunc          NowFunc
-	mu               sync.RWMutex
+	mu               sync.RWMutex // Global lock for operations needing consistency (Clear, Stats, Prune, Entries)
+	keyLocks         *keyLocks    // Per-key locking for concurrent access to different keys
 	fs               afero.Fs
 	accumulateErrors bool // If true, accumulate all validation errors; if false, fail-fast
 }
@@ -39,6 +40,7 @@ func Open(root string, options ...Option) (*Cache, error) {
 		fs:       afero.NewOsFs(),
 		nowFunc:  time.Now,
 		hashFunc: defaultHashFunc,
+		keyLocks: newKeyLocks(),
 	}
 
 	// Apply options
@@ -83,19 +85,20 @@ func (c *Cache) Key() *KeyBuilder {
 // Returns (nil, ValidationError) if the key has validation errors.
 // Returns (nil, error) for other errors (I/O, corruption, etc.).
 func (c *Cache) Get(key Key) (*Result, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Check for key validation errors first
+	// Check for key validation errors first (no lock needed)
 	if len(key.errors) > 0 {
 		return nil, newValidationError(key.errors)
 	}
 
-	// Compute key hash
+	// Compute key hash BEFORE locking (pure computation, no lock needed)
 	keyHash, err := key.computeHash()
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute key hash: %w", err)
 	}
+
+	// Use per-key lock for concurrent access to different keys
+	c.keyLocks.lockKey(keyHash)
+	defer c.keyLocks.unlockKey(keyHash)
 
 	// Check if manifest exists
 	manifestPath := c.manifestPath(keyHash)
@@ -113,12 +116,29 @@ func (c *Cache) Get(key Key) (*Result, error) {
 		return nil, fmt.Errorf("failed to load manifest: %w", err)
 	}
 
-	// Build result
+	// Verify output hash to detect corruption
+	if err := c.verifyOutputHash(m); err != nil {
+		// Delete corrupted entry
+		_ = c.deleteByKeyHash(keyHash)
+		return nil, ErrCacheCorrupted
+	}
+
+	// Update access time and save
+	m.AccessedAt = c.now()
+	if err := c.saveManifest(m); err != nil {
+		// Log but don't fail - the cache hit is still valid
+		// The access time just won't be updated
+		return nil, fmt.Errorf("failed to update manifest access time: %w", err)
+	}
+
+	// Build result with lazy-loading for data
+	// m.OutputData stores paths to .dat files, which are loaded on demand
 	result := &Result{
 		keyHash:    keyHash,
 		cache:      c,
 		files:      m.OutputFiles,
-		data:       m.OutputData,
+		dataPaths:  m.OutputData, // Paths to .dat files for lazy loading
+		dataCache:  nil,          // Initialized on first data access
 		metadata:   m.OutputMeta,
 		createdAt:  m.CreatedAt,
 		accessedAt: m.AccessedAt,
@@ -128,8 +148,8 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	if result.files == nil {
 		result.files = make(map[string]string)
 	}
-	if result.data == nil {
-		result.data = make(map[string][]byte)
+	if result.dataPaths == nil {
+		result.dataPaths = make(map[string]string)
 	}
 	if result.metadata == nil {
 		result.metadata = make(map[string]string)
@@ -166,14 +186,22 @@ func (c *Cache) Has(key Key) bool {
 
 // Delete removes a cache entry by key.
 func (c *Cache) Delete(key Key) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	// Compute key hash BEFORE locking (pure computation, no lock needed)
 	keyHash, err := key.computeHash()
 	if err != nil {
 		return fmt.Errorf("failed to compute key hash: %w", err)
 	}
 
+	// Use per-key lock for concurrent access to different keys
+	c.keyLocks.lockKey(keyHash)
+	defer c.keyLocks.unlockKey(keyHash)
+
+	return c.deleteByKeyHash(keyHash)
+}
+
+// deleteByKeyHash removes a cache entry by key hash.
+// Caller must hold the key lock.
+func (c *Cache) deleteByKeyHash(keyHash string) error {
 	// Remove manifest
 	manifestPath := c.manifestPath(keyHash)
 	if exists, _ := afero.Exists(c.fs, manifestPath); exists {

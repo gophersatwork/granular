@@ -48,19 +48,19 @@ You can also use the script directly for more control:
 
 ```bash
 # Basic usage
-./scripts/run-ci-local.sh
+./.scripts/run-ci-local.sh
 
 # Run specific job
-./scripts/run-ci-local.sh -j test
+./.scripts/run-ci-local.sh -j test
 
 # Run with verbose output
-./scripts/run-ci-local.sh -v
+./.scripts/run-ci-local.sh -v
 
 # Simulate pull request
-./scripts/run-ci-local.sh -e pull_request
+./.scripts/run-ci-local.sh -e pull_request
 
 # Show help
-./scripts/run-ci-local.sh -h
+./.scripts/run-ci-local.sh -h
 ```
 
 ## Script Options
@@ -100,7 +100,7 @@ mise install act
 ### Platform issues
 If you encounter platform-specific issues, you can specify a custom platform:
 ```bash
-./scripts/run-ci-local.sh -p "ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04"
+./.scripts/run-ci-local.sh -p "ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04"
 ```
 
 ## Integration with Development Workflow

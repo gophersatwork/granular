@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -186,8 +187,11 @@ func downloadData(cache *granular.Cache, forceInvalidate bool) (string, error) {
 
 	// Check cache (unless forcing invalidation)
 	if !forceInvalidate {
-		result := cache.Get(key)
-		if result != nil {
+		result, err := cache.Get(key)
+		if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+			return "", fmt.Errorf("failed to get from cache: %w", err)
+		}
+		if err == nil && result != nil {
 			fmt.Println("✓ Cache HIT - Using cached data")
 			fmt.Printf("  Cached: %s\n", result.Meta("timestamp"))
 			fmt.Printf("  Records: %s\n", result.Meta("record_count"))
@@ -273,8 +277,11 @@ func cleanData(cache *granular.Cache, inputPath string, forceInvalidate bool) (s
 
 	// Check cache
 	if !forceInvalidate {
-		result := cache.Get(key)
-		if result != nil {
+		result, err := cache.Get(key)
+		if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+			return "", fmt.Errorf("failed to get from cache: %w", err)
+		}
+		if err == nil && result != nil {
 			fmt.Println("✓ Cache HIT - Using cached cleaned data")
 			fmt.Printf("  Cached: %s\n", result.Meta("timestamp"))
 			fmt.Printf("  Valid records: %s/%s\n", result.Meta("valid_records"), result.Meta("total_records"))
@@ -355,8 +362,11 @@ func transformData(cache *granular.Cache, inputPath string, forceInvalidate bool
 
 	// Check cache
 	if !forceInvalidate {
-		result := cache.Get(key)
-		if result != nil {
+		result, err := cache.Get(key)
+		if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+			return "", fmt.Errorf("failed to get from cache: %w", err)
+		}
+		if err == nil && result != nil {
 			fmt.Println("✓ Cache HIT - Using cached JSON data")
 			fmt.Printf("  Cached: %s\n", result.Meta("timestamp"))
 			fmt.Printf("  Records: %s\n", result.Meta("record_count"))
@@ -440,8 +450,11 @@ func analyzeData(cache *granular.Cache, inputPath string, forceInvalidate bool) 
 
 	// Check cache
 	if !forceInvalidate {
-		result := cache.Get(key)
-		if result != nil {
+		result, err := cache.Get(key)
+		if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+			return "", fmt.Errorf("failed to get from cache: %w", err)
+		}
+		if err == nil && result != nil {
 			fmt.Println("✓ Cache HIT - Using cached statistics")
 			fmt.Printf("  Cached: %s\n", result.Meta("timestamp"))
 			fmt.Printf("  Total sales: $%s\n", result.Meta("total_sales"))
@@ -565,8 +578,11 @@ func createReport(cache *granular.Cache, statsPath string, forceInvalidate bool)
 
 	// Check cache
 	if !forceInvalidate {
-		result := cache.Get(key)
-		if result != nil {
+		result, err := cache.Get(key)
+		if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+			return "", fmt.Errorf("failed to get from cache: %w", err)
+		}
+		if err == nil && result != nil {
 			fmt.Println("✓ Cache HIT - Using cached report")
 			fmt.Printf("  Cached: %s\n", result.Meta("timestamp"))
 
