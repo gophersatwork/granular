@@ -68,6 +68,7 @@ type manifest struct {
 	OutputData  map[string]string `json:"outputData"` // name -> path to .dat file
 	OutputMeta  map[string]string `json:"outputMeta"` // metadata key-value pairs
 	OutputHash  string            `json:"outputHash"` // Hash of outputs
+	Compression CompressionType   `json:"compression,omitempty"`
 
 	// Metadata
 	CreatedAt  time.Time `json:"createdAt"`  // When the cache entry was created
@@ -221,7 +222,7 @@ func (c *Cache) verifyOutputHash(m *manifest) error {
 	}
 
 	// Load data from .dat files for hash verification
-	// m.OutputData now stores paths to .dat files, not raw bytes
+	// Read the raw (possibly compressed) data to match what was stored during commit
 	outputData := make(map[string][]byte, len(m.OutputData))
 	for name, dataPath := range m.OutputData {
 		data, err := afero.ReadFile(c.fs, dataPath)
@@ -231,7 +232,7 @@ func (c *Cache) verifyOutputHash(m *manifest) error {
 		outputData[name] = data
 	}
 
-	// Compute hash from the cached files and loaded data
+	// Compute hash from the cached files (raw, possibly compressed) and loaded data
 	computedHash, err := c.computeOutputHash(cachedPaths, outputData, m.OutputMeta)
 	if err != nil {
 		return fmt.Errorf("failed to compute hash for verification: %w", err)

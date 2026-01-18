@@ -140,7 +140,7 @@ func (wb *WriteBuilder) Commit() error {
 	for name, data := range wb.data {
 		// Store data as a file with .dat extension
 		dstPath := filepath.Join(objectDir, name+".dat")
-		if err := atomicWriteFile(wb.cache.fs, dstPath, data, 0o644); err != nil {
+		if err := wb.writeDataFile(dstPath, data); err != nil {
 			return fmt.Errorf("failed to write data %s: %w", name, err)
 		}
 		// Store the path to the .dat file in the manifest (not the raw bytes)
@@ -153,15 +153,25 @@ func (wb *WriteBuilder) Commit() error {
 		inputDescs[i] = ki.String()
 	}
 
-	// Create output file list for hash computation (use cached paths, not source paths)
-	// This ensures the hash is consistent between commit and verification
+	// Create output file list for hash computation (use cached paths for consistency with verification)
 	cachedFilePaths := make([]string, 0, len(cachedFiles))
 	for _, cachedPath := range cachedFiles {
 		cachedFilePaths = append(cachedFilePaths, cachedPath)
 	}
 
-	// Compute output hash from cached files
-	outputHash, err := wb.cache.computeOutputHash(cachedFilePaths, wb.data, wb.metadata)
+	// Read back the compressed data from .dat files for hash computation
+	// This ensures the hash matches what verification will compute
+	cachedDataForHash := make(map[string][]byte, len(cachedDataPaths))
+	for name, dataPath := range cachedDataPaths {
+		data, err := afero.ReadFile(wb.cache.fs, dataPath)
+		if err != nil {
+			return fmt.Errorf("failed to read back cached data %s: %w", name, err)
+		}
+		cachedDataForHash[name] = data
+	}
+
+	// Compute output hash from cached files and data (both possibly compressed)
+	outputHash, err := wb.cache.computeOutputHash(cachedFilePaths, cachedDataForHash, wb.metadata)
 	if err != nil {
 		return fmt.Errorf("failed to compute output hash: %w", err)
 	}
@@ -177,6 +187,7 @@ func (wb *WriteBuilder) Commit() error {
 		OutputData:  cachedDataPaths, // Store paths to .dat files
 		OutputMeta:  wb.metadata,
 		OutputHash:  outputHash,
+		Compression: wb.cache.compression,
 		CreatedAt:   wb.cache.now(),
 		AccessedAt:  wb.cache.now(),
 	}
@@ -188,7 +199,7 @@ func (wb *WriteBuilder) Commit() error {
 	return nil
 }
 
-// copyFile copies a file from src to dst atomically.
+// copyFile copies a file from src to dst atomically, applying compression if configured.
 // Uses temp file + rename to prevent corruption from crashes during copy.
 func (wb *WriteBuilder) copyFile(src, dst string) error {
 	srcFile, err := wb.cache.fs.Open(src)
@@ -213,7 +224,18 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
-	_, err = io.CopyBuffer(dstFile, srcFile, buffer)
+	// Wrap with compression if configured
+	compWriter, err := compressWriter(dstFile, wb.cache.compression)
+	if err != nil {
+		_ = dstFile.Close()
+		_ = wb.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to create compressor: %w", err)
+	}
+
+	_, err = io.CopyBuffer(compWriter, srcFile, buffer)
+	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	if closeErr := dstFile.Close(); closeErr != nil {
 		fmt.Printf("failed to close file %s: %v\n", tmpPath, closeErr)
 	}
@@ -226,6 +248,43 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 	// Atomic rename to final path
 	if err := wb.cache.fs.Rename(tmpPath, dst); err != nil {
 		// Cleanup temp file on rename failure
+		_ = wb.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+// writeDataFile writes byte data to a file atomically, applying compression if configured.
+func (wb *WriteBuilder) writeDataFile(dst string, data []byte) error {
+	tmpPath := dst + ".tmp." + randomSuffix()
+	dstFile, err := wb.cache.fs.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	// Wrap with compression if configured
+	compWriter, err := compressWriter(dstFile, wb.cache.compression)
+	if err != nil {
+		_ = dstFile.Close()
+		_ = wb.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to create compressor: %w", err)
+	}
+
+	_, err = compWriter.Write(data)
+	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if closeErr := dstFile.Close(); closeErr != nil {
+		fmt.Printf("failed to close file %s: %v\n", tmpPath, closeErr)
+	}
+	if err != nil {
+		_ = wb.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to write data: %w", err)
+	}
+
+	// Atomic rename to final path
+	if err := wb.cache.fs.Rename(tmpPath, dst); err != nil {
 		_ = wb.cache.fs.Remove(tmpPath)
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
