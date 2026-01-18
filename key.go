@@ -64,15 +64,21 @@ func (f fileInput) String() string {
 // globInput represents a glob pattern input.
 type globInput struct {
 	pattern string
+	matches []string // Cached expansion result
 }
 
 func (g globInput) hash(h hash.Hash, fs afero.Fs) error {
-	matches, err := expandGlob(g.pattern, fs)
-	if err != nil {
-		return fmt.Errorf("glob %s: %w", g.pattern, err)
+	matches := g.matches
+	if matches == nil {
+		// Fallback if not cached (shouldn't happen in normal flow)
+		var err error
+		matches, err = expandGlob(g.pattern, fs)
+		if err != nil {
+			return fmt.Errorf("glob %s: %w", g.pattern, err)
+		}
 	}
 
-	// Sort for deterministic ordering
+	// Sort for deterministic ordering (may already be sorted)
 	sort.Strings(matches)
 
 	// Hash count of matches
@@ -213,13 +219,16 @@ func (kb *KeyBuilder) Glob(pattern string) *KeyBuilder {
 		return kb
 	}
 
-	// Validate pattern by attempting to expand it
-	_, err := expandGlob(pattern, kb.cache.fs)
+	// Expand glob during validation and cache the result
+	matches, err := expandGlob(pattern, kb.cache.fs)
 	if err != nil {
 		kb.errors = append(kb.errors, fmt.Errorf("invalid glob pattern %s: %w", pattern, err))
+		kb.inputs = append(kb.inputs, globInput{pattern: pattern})
+		return kb
 	}
 
-	kb.inputs = append(kb.inputs, globInput{pattern: pattern})
+	// Cache the matches
+	kb.inputs = append(kb.inputs, globInput{pattern: pattern, matches: matches})
 	return kb
 }
 
