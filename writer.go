@@ -83,19 +83,20 @@ func (wb *WriteBuilder) Meta(key, value string) *WriteBuilder {
 // Returns a ValidationError if there are accumulated errors from key building or write operations.
 // Returns an error if the storage operation fails.
 func (wb *WriteBuilder) Commit() error {
-	// Check for accumulated validation errors first
+	// Check for accumulated validation errors first (no lock needed)
 	if len(wb.errors) > 0 {
 		return newValidationError(wb.errors)
 	}
 
-	wb.cache.mu.Lock()
-	defer wb.cache.mu.Unlock()
-
-	// Compute key hash (this will check for key validation errors)
+	// Compute key hash BEFORE locking (pure computation, no lock needed)
 	keyHash, err := wb.key.computeHash()
 	if err != nil {
 		return fmt.Errorf("failed to compute key hash: %w", err)
 	}
+
+	// Use per-key lock for concurrent writes to different keys
+	wb.cache.keyLocks.lockKey(keyHash)
+	defer wb.cache.keyLocks.unlockKey(keyHash)
 
 	// Create object directory
 	objectDir := wb.cache.objectPath(keyHash)
@@ -118,30 +119,33 @@ func (wb *WriteBuilder) Commit() error {
 		cachedFiles[name] = dstPath
 	}
 
-	// Write byte data to cache as files (but don't add to cachedFiles - keep separate)
+	// Write byte data to cache as files atomically and track paths for manifest
+	cachedDataPaths := make(map[string]string, len(wb.data))
 	for name, data := range wb.data {
 		// Store data as a file with .dat extension
 		dstPath := filepath.Join(objectDir, name+".dat")
-		if err := afero.WriteFile(wb.cache.fs, dstPath, data, 0o644); err != nil {
+		if err := atomicWriteFile(wb.cache.fs, dstPath, data, 0o644); err != nil {
 			return fmt.Errorf("failed to write data %s: %w", name, err)
 		}
-		// Note: Not adding to cachedFiles - data is kept separate from files
+		// Store the path to the .dat file in the manifest (not the raw bytes)
+		cachedDataPaths[name] = dstPath
 	}
 
 	// Build input descriptions for manifest
 	inputDescs := make([]string, len(wb.key.inputs))
-	for i, input := range wb.key.inputs {
-		inputDescs[i] = input.String()
+	for i, ki := range wb.key.inputs {
+		inputDescs[i] = ki.String()
 	}
 
-	// Create output file list (for hash computation)
-	outputFiles := make([]string, 0, len(wb.files))
-	for _, srcPath := range wb.files {
-		outputFiles = append(outputFiles, srcPath)
+	// Create output file list for hash computation (use cached paths, not source paths)
+	// This ensures the hash is consistent between commit and verification
+	cachedFilePaths := make([]string, 0, len(cachedFiles))
+	for _, cachedPath := range cachedFiles {
+		cachedFilePaths = append(cachedFilePaths, cachedPath)
 	}
 
-	// Compute output hash
-	outputHash, err := wb.cache.computeOutputHash(outputFiles, wb.data, wb.metadata)
+	// Compute output hash from cached files
+	outputHash, err := wb.cache.computeOutputHash(cachedFilePaths, wb.data, wb.metadata)
 	if err != nil {
 		return fmt.Errorf("failed to compute output hash: %w", err)
 	}
@@ -152,7 +156,7 @@ func (wb *WriteBuilder) Commit() error {
 		InputDescs:  inputDescs,
 		ExtraData:   wb.key.extras,
 		OutputFiles: cachedFiles,
-		OutputData:  wb.data,
+		OutputData:  cachedDataPaths, // Store paths to .dat files
 		OutputMeta:  wb.metadata,
 		OutputHash:  outputHash,
 		CreatedAt:   wb.cache.now(),
@@ -166,27 +170,46 @@ func (wb *WriteBuilder) Commit() error {
 	return nil
 }
 
-// copyFile copies a file from src to dst.
+// copyFile copies a file from src to dst atomically.
+// Uses temp file + rename to prevent corruption from crashes during copy.
 func (wb *WriteBuilder) copyFile(src, dst string) error {
 	srcFile, err := wb.cache.fs.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open source: %w", err)
 	}
-	defer srcFile.Close()
+	defer func(srcFile afero.File) {
+		err := srcFile.Close()
+		if err != nil {
+			fmt.Printf("failed to close file %s: %v\n", src, err)
+		}
+	}(srcFile)
 
-	dstFile, err := wb.cache.fs.Create(dst)
+	// Write to temp file first for atomic operation
+	tmpPath := dst + ".tmp." + randomSuffix()
+	dstFile, err := wb.cache.fs.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination: %w", err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer dstFile.Close()
 
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
 	_, err = io.CopyBuffer(dstFile, srcFile, buffer)
+	if closeErr := dstFile.Close(); closeErr != nil {
+		fmt.Printf("failed to close file %s: %v\n", tmpPath, closeErr)
+	}
 	if err != nil {
+		// Cleanup temp file on copy failure
+		_ = wb.cache.fs.Remove(tmpPath)
 		return fmt.Errorf("failed to copy: %w", err)
+	}
+
+	// Atomic rename to final path
+	if err := wb.cache.fs.Rename(tmpPath, dst); err != nil {
+		// Cleanup temp file on rename failure
+		_ = wb.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	return nil

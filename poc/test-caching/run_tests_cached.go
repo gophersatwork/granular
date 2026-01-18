@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,9 +56,13 @@ func main() {
 	fmt.Println()
 
 	// Check cache for existing results
-	result := cache.Get(key)
+	result, err := cache.Get(key)
+	if err != nil && !errors.Is(err, granular.ErrCacheMiss) {
+		fmt.Fprintf(os.Stderr, "Failed to get from cache: %v\n", err)
+		os.Exit(1)
+	}
 
-	if result != nil {
+	if err == nil && result != nil {
 		// Cache hit - restore and display cached results
 		fmt.Println("✓ Cache HIT - Restoring previous test results")
 		fmt.Println()

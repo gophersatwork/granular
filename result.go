@@ -5,6 +5,8 @@ import (
 	"io"
 	"path/filepath"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 // Result represents a cached result with support for multiple files and data.
@@ -13,7 +15,8 @@ type Result struct {
 	keyHash    string
 	cache      *Cache
 	files      map[string]string // name -> cached file path
-	data       map[string][]byte // name -> bytes
+	dataPaths  map[string]string // name -> path to .dat file (lazy loading)
+	dataCache  map[string][]byte // lazy-loaded cache for data bytes
 	metadata   map[string]string // metadata key-value pairs
 	createdAt  time.Time
 	accessedAt time.Time
@@ -61,13 +64,23 @@ func (r *Result) CopyFile(name, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open cached file %s: %w", src, err)
 	}
-	defer srcFile.Close()
+	defer func(srcFile afero.File) {
+		err := srcFile.Close()
+		if err != nil {
+			fmt.Printf("failed to close file %s: %v\n", srcFile.Name(), err)
+		}
+	}(srcFile)
 
 	dstFile, err := r.cache.fs.Create(dst)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}
-	defer dstFile.Close()
+	defer func(dstFile afero.File) {
+		err := dstFile.Close()
+		if err != nil {
+			fmt.Printf("failed to close file %s: %v\n", dstFile.Name(), err)
+		}
+	}(dstFile)
 
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
@@ -83,23 +96,53 @@ func (r *Result) CopyFile(name, dst string) error {
 
 // Bytes returns byte data by name.
 // Returns nil if the data doesn't exist.
+// Data is lazy-loaded from disk on first access.
 func (r *Result) Bytes(name string) []byte {
-	return r.data[name]
+	// Check if already cached
+	if r.dataCache != nil {
+		if data, ok := r.dataCache[name]; ok {
+			return data
+		}
+	}
+
+	// Check if path exists
+	path, ok := r.dataPaths[name]
+	if !ok {
+		return nil
+	}
+
+	// Lazy load from disk
+	data, err := afero.ReadFile(r.cache.fs, path)
+	if err != nil {
+		return nil
+	}
+
+	// Cache for future access
+	if r.dataCache == nil {
+		r.dataCache = make(map[string][]byte)
+	}
+	r.dataCache[name] = data
+
+	return data
 }
 
 // Data returns all byte data as a map of name -> bytes.
+// Data is lazy-loaded from disk.
 func (r *Result) Data() map[string][]byte {
-	result := make(map[string][]byte, len(r.data))
-	for k, v := range r.data {
-		// Return copy to prevent mutation
-		result[k] = append([]byte(nil), v...)
+	result := make(map[string][]byte, len(r.dataPaths))
+	for name := range r.dataPaths {
+		data := r.Bytes(name)
+		if data != nil {
+			// Return copy to prevent mutation
+			result[name] = append([]byte(nil), data...)
+		}
 	}
 	return result
 }
 
 // HasData returns true if data with the given name exists in the cache.
 func (r *Result) HasData(name string) bool {
-	_, ok := r.data[name]
+	_, ok := r.dataPaths[name]
 	return ok
 }
 
@@ -156,22 +199,4 @@ func (r *Result) Size() int64 {
 // Useful for debugging and logging.
 func (r *Result) KeyHash() string {
 	return r.keyHash
-}
-
-// fileNames returns a sorted list of all file names in this result.
-func (r *Result) fileNames() []string {
-	names := make([]string, 0, len(r.files))
-	for name := range r.files {
-		names = append(names, name)
-	}
-	return names
-}
-
-// dataNames returns a sorted list of all data names in this result.
-func (r *Result) dataNames() []string {
-	names := make([]string, 0, len(r.data))
-	for name := range r.data {
-		names = append(names, name)
-	}
-	return names
 }

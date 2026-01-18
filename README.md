@@ -432,7 +432,7 @@ mise run ci:pr
 mise run ci:list
 ```
 
-This uses [act](https://github.com/nektos/act) to run workflows in Docker containers. See [scripts/README.md](scripts/README.md) for more details.
+This uses [act](https://github.com/nektos/act) to run workflows in Docker containers. See [scripts/README.md](.scripts/README.md) for more details.
 
 ### Development Workflow
 
