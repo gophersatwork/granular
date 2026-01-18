@@ -25,6 +25,7 @@ type Cache struct {
 	accumulateErrors bool            // If true, accumulate all validation errors; if false, fail-fast
 	maxSize          int64           // Maximum cache size in bytes; 0 means no limit
 	compression      CompressionType // Compression algorithm for stored data
+	metrics          *MetricsHooks   // Optional metrics hooks for observability
 }
 
 // HashFunc defines a function that creates a new hash.Hash instance.
@@ -112,6 +113,7 @@ func (c *Cache) Get(key Key) (*Result, error) {
 		return nil, fmt.Errorf("failed to check manifest: %w", err)
 	}
 	if !exists {
+		c.metrics.miss(keyHash)
 		return nil, ErrCacheMiss
 	}
 
@@ -171,6 +173,11 @@ func (c *Cache) Get(key Key) (*Result, error) {
 		result.metadata = make(map[string]string)
 	}
 
+	// Report cache hit with entry size
+	objectDir := c.objectPath(keyHash)
+	entrySize, _ := c.dirSize(objectDir)
+	c.metrics.hit(keyHash, entrySize)
+
 	return result, nil
 }
 
@@ -212,7 +219,16 @@ func (c *Cache) Delete(key Key) error {
 	c.keyLocks.lockKey(keyHash)
 	defer c.keyLocks.unlockKey(keyHash)
 
-	return c.deleteByKeyHash(keyHash)
+	// Get entry size before deleting for metrics
+	objectDir := c.objectPath(keyHash)
+	entrySize, _ := c.dirSize(objectDir)
+
+	if err := c.deleteByKeyHash(keyHash); err != nil {
+		return err
+	}
+
+	c.metrics.evict(keyHash, entrySize, EvictReasonManual)
+	return nil
 }
 
 // deleteByKeyHash removes a cache entry by key hash.
@@ -242,6 +258,12 @@ func (c *Cache) Clear() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Collect entries for metrics before removing
+	var entriesToEvict []Entry
+	if c.metrics != nil && c.metrics.OnEvict != nil {
+		entriesToEvict, _ = c.entriesUnlocked()
+	}
+
 	// Remove everything
 	if err := c.fs.RemoveAll(c.manifestDir()); err != nil {
 		return fmt.Errorf("failed to remove manifests: %w", err)
@@ -256,6 +278,11 @@ func (c *Cache) Clear() error {
 	}
 	if err := c.fs.MkdirAll(c.objectsDir(), 0o755); err != nil {
 		return fmt.Errorf("failed to recreate objects directory: %w", err)
+	}
+
+	// Report evictions
+	for _, entry := range entriesToEvict {
+		c.metrics.evict(entry.KeyHash, entry.Size, EvictReasonClear)
 	}
 
 	return nil
@@ -348,6 +375,7 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 		if err := c.removeByHash(entry.KeyHash); err != nil {
 			return fmt.Errorf("failed to evict entry %s: %w", entry.KeyHash, err)
 		}
+		c.metrics.evict(entry.KeyHash, entry.Size, EvictReasonLRU)
 		currentSize -= entry.Size
 	}
 

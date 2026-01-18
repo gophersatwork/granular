@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/afero"
 )
@@ -83,6 +84,8 @@ func (wb *WriteBuilder) Meta(key, value string) *WriteBuilder {
 // Returns a ValidationError if there are accumulated errors from key building or write operations.
 // Returns an error if the storage operation fails.
 func (wb *WriteBuilder) Commit() error {
+	startTime := time.Now()
+
 	// Check for accumulated validation errors first (no lock needed)
 	if len(wb.errors) > 0 {
 		return newValidationError(wb.errors)
@@ -195,6 +198,9 @@ func (wb *WriteBuilder) Commit() error {
 	if err := wb.cache.saveManifest(manifest); err != nil {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
+
+	// Report successful put with duration
+	wb.cache.metrics.put(keyHash, requiredSpace, time.Since(startTime))
 
 	return nil
 }
