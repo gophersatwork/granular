@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,11 +17,13 @@ import (
 type Cache struct {
 	root             string
 	hashFunc         HashFunc
+	hashAlgoName     string // Name of the hash algorithm for manifest compatibility
 	nowFunc          NowFunc
 	mu               sync.RWMutex // Global lock for operations needing consistency (Clear, Stats, Prune, Entries)
 	keyLocks         *keyLocks    // Per-key locking for concurrent access to different keys
 	fs               afero.Fs
-	accumulateErrors bool // If true, accumulate all validation errors; if false, fail-fast
+	accumulateErrors bool  // If true, accumulate all validation errors; if false, fail-fast
+	maxSize          int64 // Maximum cache size in bytes; 0 means no limit
 }
 
 // HashFunc defines a function that creates a new hash.Hash instance.
@@ -36,11 +39,12 @@ type Option func(*Cache)
 // The directory will be created if it doesn't exist.
 func Open(root string, options ...Option) (*Cache, error) {
 	cache := &Cache{
-		root:     root,
-		fs:       afero.NewOsFs(),
-		nowFunc:  time.Now,
-		hashFunc: defaultHashFunc,
-		keyLocks: newKeyLocks(),
+		root:         root,
+		fs:           afero.NewOsFs(),
+		nowFunc:      time.Now,
+		hashFunc:     defaultHashFunc,
+		hashAlgoName: DefaultHashAlgoName,
+		keyLocks:     newKeyLocks(),
 	}
 
 	// Apply options
@@ -114,6 +118,16 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	m, err := c.loadManifest(keyHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load manifest: %w", err)
+	}
+
+	// Validate hash algorithm compatibility
+	// For legacy manifests (version 0) without HashAlgo, assume the default (xxhash64)
+	manifestHashAlgo := m.HashAlgo
+	if manifestHashAlgo == "" {
+		manifestHashAlgo = DefaultHashAlgoName
+	}
+	if manifestHashAlgo != c.hashAlgoName {
+		return nil, ErrHashAlgoMismatch
 	}
 
 	// Verify output hash to detect corruption
@@ -292,4 +306,80 @@ func (c *Cache) now() time.Time {
 // defaultHashFunc returns the default hash function (xxHash64).
 func defaultHashFunc() hash.Hash {
 	return xxhash.New()
+}
+
+// evictIfNeeded removes least-recently-accessed entries if adding requiredSpace
+// would exceed the cache's maximum size. If maxSize is 0 or negative, this is a no-op.
+// Caller must hold the global lock (c.mu).
+func (c *Cache) evictIfNeeded(requiredSpace int64) error {
+	if c.maxSize <= 0 {
+		return nil // No limit set
+	}
+
+	// Get all entries with their sizes
+	entries, err := c.entriesUnlocked()
+	if err != nil {
+		return fmt.Errorf("failed to get cache entries for eviction: %w", err)
+	}
+
+	// Calculate current total size
+	var currentSize int64
+	for _, entry := range entries {
+		currentSize += entry.Size
+	}
+
+	// Check if we have enough space
+	if currentSize+requiredSpace <= c.maxSize {
+		return nil // Enough space
+	}
+
+	// Sort by AccessedAt ascending (oldest/least recently accessed first)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].AccessedAt.Before(entries[j].AccessedAt)
+	})
+
+	// Evict until we have enough space
+	for _, entry := range entries {
+		if currentSize+requiredSpace <= c.maxSize {
+			break
+		}
+		if err := c.removeByHash(entry.KeyHash); err != nil {
+			return fmt.Errorf("failed to evict entry %s: %w", entry.KeyHash, err)
+		}
+		currentSize -= entry.Size
+	}
+
+	return nil
+}
+
+// entriesUnlocked returns all cache entries without acquiring locks.
+// Caller must hold at least a read lock on c.mu.
+func (c *Cache) entriesUnlocked() ([]Entry, error) {
+	var entries []Entry
+
+	err := c.walkManifests(func(keyHash string, m *manifest) error {
+		objectDir := c.objectPath(keyHash)
+		size, _ := c.dirSize(objectDir)
+
+		entry := Entry{
+			KeyHash:    keyHash,
+			CreatedAt:  m.CreatedAt,
+			AccessedAt: m.AccessedAt,
+			Size:       size,
+			FileCount:  len(m.OutputFiles) + len(m.OutputData),
+		}
+		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// MaxSize returns the maximum cache size in bytes.
+// Returns 0 if no size limit is set.
+func (c *Cache) MaxSize() int64 {
+	return c.maxSize
 }

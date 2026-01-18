@@ -54,6 +54,10 @@ func atomicWriteFile(fs afero.Fs, path string, data []byte, perm os.FileMode) er
 // manifest represents a cache manifest file (internal use only).
 // It contains metadata about a cached computation.
 type manifest struct {
+	// Manifest metadata
+	Version  int    `json:"version"`  // Manifest format version (0 = legacy, 1 = current)
+	HashAlgo string `json:"hashAlgo"` // Hash algorithm identifier (e.g., "xxhash64")
+
 	// Key information
 	KeyHash    string            `json:"keyHash"` // Hash of the key
 	InputDescs []string          `json:"inputs"`  // String descriptions of inputs

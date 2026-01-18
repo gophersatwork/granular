@@ -45,11 +45,16 @@ type fileInput struct {
 }
 
 func (f fileInput) hash(h hash.Hash, fs afero.Fs) error {
-	data, err := afero.ReadFile(fs, f.path)
+	file, err := fs.Open(f.path)
 	if err != nil {
-		return fmt.Errorf("file %s: %w", f.path, err)
+		return fmt.Errorf("failed to open file %s: %w", f.path, err)
 	}
-	return hashFile(bytes.NewReader(data), h)
+	defer file.Close()
+
+	if err := hashFile(file, h); err != nil {
+		return fmt.Errorf("failed to hash file %s: %w", f.path, err)
+	}
+	return nil
 }
 
 func (f fileInput) String() string {
@@ -76,13 +81,15 @@ func (g globInput) hash(h hash.Hash, fs afero.Fs) error {
 	// Hash each matched file
 	for _, match := range matches {
 		h.Write([]byte(match))
-		data, err := afero.ReadFile(fs, match)
+		file, err := fs.Open(match)
 		if err != nil {
-			return fmt.Errorf("glob match %s: %w", match, err)
+			return fmt.Errorf("failed to open glob match %s: %w", match, err)
 		}
-		if err := hashFile(bytes.NewReader(data), h); err != nil {
-			return err
+		if err := hashFile(file, h); err != nil {
+			file.Close()
+			return fmt.Errorf("failed to hash glob match %s: %w", match, err)
 		}
+		file.Close()
 	}
 
 	return nil
@@ -133,15 +140,17 @@ func (d dirInput) hash(h hash.Hash, fs afero.Fs) error {
 	_, _ = fmt.Fprintf(h, "%d", len(files))
 
 	// Hash each file
-	for _, file := range files {
-		h.Write([]byte(file))
-		data, err := afero.ReadFile(fs, file)
+	for _, filePath := range files {
+		h.Write([]byte(filePath))
+		file, err := fs.Open(filePath)
 		if err != nil {
-			return fmt.Errorf("dir file %s: %w", file, err)
+			return fmt.Errorf("failed to open dir file %s: %w", filePath, err)
 		}
-		if err := hashFile(bytes.NewReader(data), h); err != nil {
-			return err
+		if err := hashFile(file, h); err != nil {
+			file.Close()
+			return fmt.Errorf("failed to hash dir file %s: %w", filePath, err)
 		}
+		file.Close()
 	}
 
 	return nil
