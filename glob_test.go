@@ -2,7 +2,9 @@ package granular
 
 import (
 	"errors"
+	"os"
 	"sort"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -575,4 +577,227 @@ func TestGlobExcludeInDir(t *testing.T) {
 			t.Error("Hash should not be empty")
 		}
 	})
+}
+
+// walkCountingFs wraps an afero.Fs to count the number of Walk calls.
+type walkCountingFs struct {
+	afero.Fs
+	walkCount atomic.Int64
+}
+
+func (w *walkCountingFs) Open(name string) (afero.File, error) {
+	return w.Fs.Open(name)
+}
+
+func (w *walkCountingFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	return w.Fs.OpenFile(name, flag, perm)
+}
+
+// Walk is called by afero.Walk, but afero.Walk actually uses Open/ReadDir internally.
+// We need to intercept at the ReadDir level on directories.
+
+// walkCountingFile wraps afero.File to count Readdir calls.
+type walkCountingFile struct {
+	afero.File
+	fs *walkCountingFs
+}
+
+func (f *walkCountingFile) Readdir(count int) ([]os.FileInfo, error) {
+	f.fs.walkCount.Add(1)
+	return f.File.Readdir(count)
+}
+
+func (f *walkCountingFile) Readdirnames(n int) ([]string, error) {
+	f.fs.walkCount.Add(1)
+	return f.File.Readdirnames(n)
+}
+
+// newWalkCountingFs creates a filesystem that counts directory reads (walks).
+func newWalkCountingFs(base afero.Fs) *walkCountingFs {
+	return &walkCountingFs{Fs: base}
+}
+
+// openCountingFs tracks Open calls for directories to count walks.
+type openCountingFs struct {
+	afero.Fs
+	openDirCount atomic.Int64
+}
+
+func (o *openCountingFs) Open(name string) (afero.File, error) {
+	file, err := o.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	// Check if it's a directory
+	stat, err := file.Stat()
+	if err != nil {
+		return file, nil
+	}
+	if stat.IsDir() {
+		o.openDirCount.Add(1)
+	}
+	return file, nil
+}
+
+// TestGlobCaching verifies that glob expansion is cached and only performed once.
+func TestGlobCaching(t *testing.T) {
+	baseFs := setupGlobTestFs(t)
+	countingFs := &openCountingFs{Fs: baseFs}
+
+	cache, err := Open(".cache", WithFs(countingFs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			t.Fatalf("cache close failed: %v", err)
+		}
+	}()
+
+	// Reset counter before the test
+	countingFs.openDirCount.Store(0)
+
+	// Build a key with a glob pattern
+	key := cache.Key().Glob("src/**/*.go").Build()
+
+	// Record the count after Glob() call (which should expand and cache)
+	countAfterGlob := countingFs.openDirCount.Load()
+
+	// Now compute the hash (which should use cached matches)
+	hash, err := key.computeHash()
+	if err != nil {
+		t.Fatalf("computeHash failed: %v", err)
+	}
+	if hash == "" {
+		t.Error("Hash should not be empty")
+	}
+
+	// Record the count after computeHash
+	countAfterHash := countingFs.openDirCount.Load()
+
+	// The directory open count should NOT have increased significantly after computeHash
+	// because the glob expansion was cached during Glob() call.
+	// We expect some directory opens for the initial walk, but no additional walks
+	// during hash computation.
+	additionalOpens := countAfterHash - countAfterGlob
+
+	t.Logf("Directory opens after Glob(): %d", countAfterGlob)
+	t.Logf("Directory opens after computeHash(): %d", countAfterHash)
+	t.Logf("Additional directory opens during hash: %d", additionalOpens)
+
+	// After caching, computeHash should not trigger any additional directory walks
+	// Only file opens for hashing content (which are not directories)
+	if additionalOpens > 0 {
+		t.Errorf("Expected no additional directory opens during hash computation (glob should be cached), but got %d", additionalOpens)
+	}
+}
+
+// TestGlobCachingMultiplePatterns verifies caching works with multiple glob patterns.
+func TestGlobCachingMultiplePatterns(t *testing.T) {
+	baseFs := setupGlobTestFs(t)
+	countingFs := &openCountingFs{Fs: baseFs}
+
+	cache, err := Open(".cache", WithFs(countingFs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			t.Fatalf("cache close failed: %v", err)
+		}
+	}()
+
+	// Reset counter
+	countingFs.openDirCount.Store(0)
+
+	// Build a key with multiple glob patterns
+	key := cache.Key().
+		Glob("src/**/*.go").
+		Glob("tests/**/*.go").
+		Build()
+
+	countAfterGlobs := countingFs.openDirCount.Load()
+
+	// Compute hash
+	hash, err := key.computeHash()
+	if err != nil {
+		t.Fatalf("computeHash failed: %v", err)
+	}
+	if hash == "" {
+		t.Error("Hash should not be empty")
+	}
+
+	countAfterHash := countingFs.openDirCount.Load()
+	additionalOpens := countAfterHash - countAfterGlobs
+
+	t.Logf("Directory opens after Glob() calls: %d", countAfterGlobs)
+	t.Logf("Directory opens after computeHash(): %d", countAfterHash)
+
+	if additionalOpens > 0 {
+		t.Errorf("Expected no additional directory opens during hash computation, but got %d", additionalOpens)
+	}
+}
+
+// TestGlobCachingWithError verifies that errors during glob expansion are handled correctly.
+func TestGlobCachingWithError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			t.Fatalf("cache close failed: %v", err)
+		}
+	}()
+
+	// Use a pattern that doesn't match anything (not an error, just empty)
+	key := cache.Key().Glob("nonexistent/**/*.go").Build()
+
+	hash, err := key.computeHash()
+	if err != nil {
+		t.Fatalf("computeHash failed: %v", err)
+	}
+	if hash == "" {
+		t.Error("Hash should not be empty even with no matches")
+	}
+}
+
+// TestGlobInputString verifies the String() method of globInput.
+func TestGlobInputString(t *testing.T) {
+	g := globInput{pattern: "src/**/*.go"}
+	expected := "glob:src/**/*.go"
+	if g.String() != expected {
+		t.Errorf("globInput.String() = %q, want %q", g.String(), expected)
+	}
+}
+
+// TestGlobInputHashFallback verifies the fallback path in hash() when matches is nil.
+func TestGlobInputHashFallback(t *testing.T) {
+	fs := setupGlobTestFs(t)
+
+	// Create a globInput without cached matches to test fallback
+	g := globInput{pattern: "src/**/*.go", matches: nil}
+
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			t.Fatalf("cache close failed: %v", err)
+		}
+	}()
+
+	h := cache.newHash()
+	err = g.hash(h, fs)
+	if err != nil {
+		t.Fatalf("hash failed: %v", err)
+	}
+
+	// Verify the hash was computed (non-empty)
+	sum := h.Sum(nil)
+	if len(sum) == 0 {
+		t.Error("Hash sum should not be empty")
+	}
 }

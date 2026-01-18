@@ -119,8 +119,14 @@ func TestGlobInput(t *testing.T) {
 	newFilePath := filepath.Join(testDir, "file4.txt")
 	createTestFile(t, memFs, newFilePath, []byte("file4"))
 
+	// Build a new key to detect filesystem changes
+	// (Key objects cache glob matches, so must rebuild to see new files)
+	keyAfterAdd := cache.Key().
+		Glob(filepath.Join(testDir, "*.txt")).
+		Build()
+
 	// Get should be a miss after adding a file
-	result, err = cache.Get(key)
+	result, err = cache.Get(keyAfterAdd)
 	assertCacheMiss(t, result, err, "Get after adding file")
 }
 
