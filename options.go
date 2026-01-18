@@ -93,3 +93,16 @@ func WithMaxSize(bytes int64) Option {
 		c.maxSize = bytes
 	}
 }
+
+// WithCompression sets the compression algorithm for stored data.
+// Supported types are CompressionGzip and CompressionZstd.
+// CompressionNone (empty string) disables compression (default).
+//
+// Example:
+//
+//	cache, err := granular.Open(".cache", granular.WithCompression(granular.CompressionZstd))
+func WithCompression(ct CompressionType) Option {
+	return func(c *Cache) {
+		c.compression = ct
+	}
+}

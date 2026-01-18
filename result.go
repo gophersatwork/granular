@@ -12,14 +12,15 @@ import (
 // Result represents a cached result with support for multiple files and data.
 // Users should not construct this directly - it's returned by Cache.Get().
 type Result struct {
-	keyHash    string
-	cache      *Cache
-	files      map[string]string // name -> cached file path
-	dataPaths  map[string]string // name -> path to .dat file (lazy loading)
-	dataCache  map[string][]byte // lazy-loaded cache for data bytes
-	metadata   map[string]string // metadata key-value pairs
-	createdAt  time.Time
-	accessedAt time.Time
+	keyHash     string
+	cache       *Cache
+	files       map[string]string // name -> cached file path
+	dataPaths   map[string]string // name -> path to .dat file (lazy loading)
+	dataCache   map[string][]byte // lazy-loaded cache for data bytes
+	metadata    map[string]string // metadata key-value pairs
+	compression CompressionType   // compression used for stored data
+	createdAt   time.Time
+	accessedAt  time.Time
 }
 
 // File returns the path to a cached file by name.
@@ -43,7 +44,7 @@ func (r *Result) HasFile(name string) bool {
 	return ok
 }
 
-// CopyFile copies a cached file to the destination path.
+// CopyFile copies a cached file to the destination path, decompressing if needed.
 // Returns an error if the file doesn't exist or the copy fails.
 func (r *Result) CopyFile(name, dst string) error {
 	src := r.files[name]
@@ -59,7 +60,7 @@ func (r *Result) CopyFile(name, dst string) error {
 		}
 	}
 
-	// Copy the file
+	// Open source file
 	srcFile, err := r.cache.fs.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open cached file %s: %w", src, err)
@@ -70,6 +71,13 @@ func (r *Result) CopyFile(name, dst string) error {
 			fmt.Printf("failed to close file %s: %v\n", srcFile.Name(), err)
 		}
 	}(srcFile)
+
+	// Wrap with decompression if needed
+	reader, err := decompressReader(srcFile, r.compression)
+	if err != nil {
+		return fmt.Errorf("failed to create decompressor: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
 
 	dstFile, err := r.cache.fs.Create(dst)
 	if err != nil {
@@ -86,7 +94,7 @@ func (r *Result) CopyFile(name, dst string) error {
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
-	_, err = io.CopyBuffer(dstFile, srcFile, buffer)
+	_, err = io.CopyBuffer(dstFile, reader, buffer)
 	if err != nil {
 		return fmt.Errorf("failed to copy file: %w", err)
 	}
@@ -96,7 +104,7 @@ func (r *Result) CopyFile(name, dst string) error {
 
 // Bytes returns byte data by name.
 // Returns nil if the data doesn't exist.
-// Data is lazy-loaded from disk on first access.
+// Data is lazy-loaded from disk on first access and decompressed if needed.
 func (r *Result) Bytes(name string) []byte {
 	// Check if already cached
 	if r.dataCache != nil {
@@ -111,8 +119,8 @@ func (r *Result) Bytes(name string) []byte {
 		return nil
 	}
 
-	// Lazy load from disk
-	data, err := afero.ReadFile(r.cache.fs, path)
+	// Lazy load from disk with decompression
+	data, err := r.readCompressedFile(path)
 	if err != nil {
 		return nil
 	}
@@ -124,6 +132,23 @@ func (r *Result) Bytes(name string) []byte {
 	r.dataCache[name] = data
 
 	return data
+}
+
+// readCompressedFile reads a file and decompresses it if needed.
+func (r *Result) readCompressedFile(path string) ([]byte, error) {
+	file, err := r.cache.fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	reader, err := decompressReader(file, r.compression)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	return io.ReadAll(reader)
 }
 
 // Data returns all byte data as a map of name -> bytes.
