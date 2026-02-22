@@ -26,7 +26,7 @@ func TestProperty_HashDeterminism(t *testing.T) {
 
 		// Create random test files
 		numFiles := r.Intn(5) + 1
-		for i := 0; i < numFiles; i++ {
+		for i := range numFiles {
 			filename := fmt.Sprintf("file%d.txt", i)
 			content := make([]byte, r.Intn(100)+1)
 			r.Read(content)
@@ -35,13 +35,13 @@ func TestProperty_HashDeterminism(t *testing.T) {
 
 		// Build key with random inputs
 		kb := cache.Key()
-		for i := 0; i < numFiles; i++ {
+		for i := range numFiles {
 			kb = kb.File(fmt.Sprintf("file%d.txt", i))
 		}
 
 		// Add random string pairs
 		numStrings := r.Intn(3)
-		for i := 0; i < numStrings; i++ {
+		for i := range numStrings {
 			kb = kb.String(fmt.Sprintf("key%d", i), fmt.Sprintf("value%d", r.Intn(100)))
 		}
 
@@ -89,7 +89,7 @@ func TestProperty_HashIndependentOfInputOrder(t *testing.T) {
 		// String() calls should be order-independent (internally sorted)
 		numPairs := r.Intn(5) + 1
 		pairs := make(map[string]string)
-		for i := 0; i < numPairs; i++ {
+		for i := range numPairs {
 			pairs[fmt.Sprintf("key%d", i)] = fmt.Sprintf("value%d", r.Intn(100))
 		}
 
@@ -147,7 +147,7 @@ func TestProperty_CacheIdempotency(t *testing.T) {
 		key := cache.Key().File("input.txt").String("v", "1").Build()
 
 		// Put same entry multiple times
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			err := cache.Put(key).Bytes("output", outputData).Commit()
 			if err != nil {
 				return false
@@ -197,7 +197,7 @@ func TestProperty_ManifestRoundTrip(t *testing.T) {
 		// Create random output data
 		numDataEntries := r.Intn(5) + 1
 		outputData := make(map[string][]byte)
-		for i := 0; i < numDataEntries; i++ {
+		for i := range numDataEntries {
 			data := make([]byte, r.Intn(50)+1)
 			r.Read(data)
 			outputData[fmt.Sprintf("data%d", i)] = data
@@ -206,7 +206,7 @@ func TestProperty_ManifestRoundTrip(t *testing.T) {
 		// Create random metadata
 		numMeta := r.Intn(5) + 1
 		metadata := make(map[string]string)
-		for i := 0; i < numMeta; i++ {
+		for i := range numMeta {
 			metadata[fmt.Sprintf("meta%d", i)] = fmt.Sprintf("value%d", r.Intn(100))
 		}
 
@@ -401,12 +401,12 @@ func TestProperty_GlobMatchesAreSubsetOfWalk(t *testing.T) {
 		numDirs := r.Intn(3) + 1
 		numFiles := r.Intn(10) + 1
 
-		for i := 0; i < numDirs; i++ {
+		for i := range numDirs {
 			dir := fmt.Sprintf("dir%d", i)
 			fs.MkdirAll(dir, 0o755)
 
 			// Create some files in each dir
-			for j := 0; j < numFiles; j++ {
+			for j := range numFiles {
 				ext := []string{".go", ".txt", ".md"}[r.Intn(3)]
 				path := fmt.Sprintf("%s/file%d%s", dir, j, ext)
 				afero.WriteFile(fs, path, []byte("content"), 0o644)
@@ -472,7 +472,7 @@ func TestProperty_ClearRemovesAllEntries(t *testing.T) {
 		numEntries := r.Intn(10) + 1
 		keys := make([]Key, numEntries)
 
-		for i := 0; i < numEntries; i++ {
+		for i := range numEntries {
 			keys[i] = cache.Key().
 				File("test.txt").
 				String("id", fmt.Sprintf("%d", i)).

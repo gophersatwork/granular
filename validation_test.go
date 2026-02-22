@@ -132,9 +132,9 @@ func TestValidationError_ErrorsAs(t *testing.T) {
 		},
 	}
 
-	var target *CustomError
-	if !errors.As(ve, &target) {
-		t.Fatal("errors.As() should find CustomError")
+	target, ok := errors.AsType[*CustomError](ve)
+	if !ok {
+		t.Fatal("errors.AsType should find CustomError")
 	}
 
 	if target.Code != 404 {
@@ -168,8 +168,8 @@ func TestNewValidationError(t *testing.T) {
 			t.Fatal("newValidationError should not return nil for non-empty slice")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatal("newValidationError should return *ValidationError")
 		}
 
@@ -207,8 +207,8 @@ func TestKeyBuilder_FileValidation(t *testing.T) {
 			t.Fatal("Expected validation error for non-existent file")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -311,8 +311,8 @@ func TestKeyBuilder_DirValidation(t *testing.T) {
 			t.Fatal("Expected validation error for non-existent directory")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -335,8 +335,8 @@ func TestKeyBuilder_DirValidation(t *testing.T) {
 			t.Fatal("Expected validation error for invalid exclude pattern")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -385,8 +385,8 @@ func TestKeyBuilder_AccumulateErrors(t *testing.T) {
 			t.Fatal("Expected validation error")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -416,8 +416,8 @@ func TestKeyBuilder_AccumulateErrors(t *testing.T) {
 			t.Fatal("Expected validation error")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -459,8 +459,8 @@ func TestKeyBuilder_AccumulateErrors(t *testing.T) {
 			t.Fatal("Expected validation errors")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -524,8 +524,8 @@ func TestKeyBuilder_ValidateMultipleExcludePatterns(t *testing.T) {
 			t.Fatal("Expected validation errors for invalid patterns")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 
@@ -551,8 +551,8 @@ func TestKeyBuilder_ValidateMultipleExcludePatterns(t *testing.T) {
 			t.Fatal("Expected validation error")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
 

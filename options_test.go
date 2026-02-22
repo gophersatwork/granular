@@ -369,8 +369,8 @@ func TestWithAccumulateErrors(t *testing.T) {
 
 		// Fail-fast mode: validation stops after first error
 		// But all inputs are still added
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected ValidationError, got %T", err)
 		}
 
@@ -404,8 +404,8 @@ func TestWithAccumulateErrors(t *testing.T) {
 			t.Fatal("Expected error")
 		}
 
-		var ve *ValidationError
-		if !errors.As(err, &ve) {
+		ve, ok := errors.AsType[*ValidationError](err)
+		if !ok {
 			t.Fatalf("Expected ValidationError, got %T", err)
 		}
 

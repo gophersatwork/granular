@@ -12,7 +12,7 @@ const defaultBufferSize = 32 * 1024 // 32KB
 
 // bufferPool is a pool of byte slices used for file I/O during hashing
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buffer := make([]byte, defaultBufferSize)
 		return &buffer
 	},

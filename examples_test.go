@@ -169,7 +169,7 @@ func Example_cacheManagement() {
 	cache := granular.OpenTemp()
 
 	// Add some entries
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key := cache.Key().
 			String("item", fmt.Sprintf("item%d", i)).
 			Build()

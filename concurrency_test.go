@@ -42,23 +42,20 @@ func TestConcurrentReads(t *testing.T) {
 	// Launch multiple concurrent readers
 	const numReaders = 10
 	var wg sync.WaitGroup
-	wg.Add(numReaders)
 
 	results := make([]*Result, numReaders)
 	errs := make([]error, numReaders)
 
-	for i := 0; i < numReaders; i++ {
-		i := i
-		go func() {
-			defer wg.Done()
+	for i := range numReaders {
+		wg.Go(func() {
 			results[i], errs[i] = cache.Get(key)
-		}()
+		})
 	}
 
 	wg.Wait()
 
 	// All reads should succeed
-	for i := 0; i < numReaders; i++ {
+	for i := range numReaders {
 		if errs[i] != nil {
 			t.Errorf("Reader %d got error: %v", i, errs[i])
 		}
@@ -83,14 +80,11 @@ func TestConcurrentWrites(t *testing.T) {
 
 	const numWriters = 10
 	var wg sync.WaitGroup
-	wg.Add(numWriters)
 
 	errs := make([]error, numWriters)
 
-	for i := 0; i < numWriters; i++ {
-		i := i
-		go func() {
-			defer wg.Done()
+	for i := range numWriters {
+		wg.Go(func() {
 			// Each writer creates a unique key
 			key := cache.Key().
 				File("file1.txt").
@@ -99,20 +93,20 @@ func TestConcurrentWrites(t *testing.T) {
 			errs[i] = cache.Put(key).
 				Bytes("output", []byte(fmt.Sprintf("data-%d", i))).
 				Commit()
-		}()
+		})
 	}
 
 	wg.Wait()
 
 	// All writes should succeed
-	for i := 0; i < numWriters; i++ {
+	for i := range numWriters {
 		if errs[i] != nil {
 			t.Errorf("Writer %d got error: %v", i, errs[i])
 		}
 	}
 
 	// Verify all entries exist
-	for i := 0; i < numWriters; i++ {
+	for i := range numWriters {
 		key := cache.Key().
 			File("file1.txt").
 			String("writer", fmt.Sprintf("writer-%d", i)).
@@ -138,22 +132,19 @@ func TestReadDuringWrite(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 
 	var readResult *Result
 	var readErr error
 
 	// Reader goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		readResult, readErr = cache.Get(key)
-	}()
+	})
 
 	// Writer goroutine (overwrites the same key)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		cache.Put(key).Bytes("output", []byte("v2")).Commit()
-	}()
+	})
 
 	wg.Wait()
 
@@ -185,22 +176,19 @@ func TestDeleteDuringRead(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 
 	var readErr error
 	var deleteErr error
 
 	// Reader goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, readErr = cache.Get(key)
-	}()
+	})
 
 	// Deleter goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		deleteErr = cache.Delete(key)
-	}()
+	})
 
 	wg.Wait()
 
@@ -222,7 +210,7 @@ func TestClearDuringOperations(t *testing.T) {
 	defer cache.Close()
 
 	// Populate cache with multiple entries
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := cache.Key().
 			File("file1.txt").
 			String("id", fmt.Sprintf("%d", i)).
@@ -234,31 +222,27 @@ func TestClearDuringOperations(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
 
 	var readErr error
 	var writeErr error
 	var clearErr error
 
 	// Reader goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		key := cache.Key().File("file1.txt").String("id", "0").Build()
 		_, readErr = cache.Get(key)
-	}()
+	})
 
 	// Writer goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		key := cache.Key().File("file1.txt").String("id", "999").Build()
 		writeErr = cache.Put(key).Bytes("output", []byte("new")).Commit()
-	}()
+	})
 
 	// Clear goroutine
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		clearErr = cache.Clear()
-	}()
+	})
 
 	wg.Wait()
 
@@ -286,13 +270,10 @@ func TestRaceDetectorCoverage(t *testing.T) {
 	const iterations = 10
 
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
-		i := i
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+	for i := range numGoroutines {
+		wg.Go(func() {
+			for j := range iterations {
 				key := cache.Key().
 					File("file1.txt").
 					String("g", fmt.Sprintf("%d", i)).
@@ -315,7 +296,7 @@ func TestRaceDetectorCoverage(t *testing.T) {
 					cache.Delete(key)
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -329,18 +310,15 @@ func TestConcurrentHashComputation(t *testing.T) {
 
 	const numGoroutines = 10
 	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
 
 	hashes := make([]string, numGoroutines)
 
 	// Multiple goroutines computing hash for the same key
-	for i := 0; i < numGoroutines; i++ {
-		i := i
-		go func() {
-			defer wg.Done()
+	for i := range numGoroutines {
+		wg.Go(func() {
 			key := cache.Key().File("file1.txt").Build()
 			hashes[i], _ = key.computeHash()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -363,43 +341,37 @@ func TestConcurrentMultipleKeys(t *testing.T) {
 	const numOpsPerKey = 4
 
 	var wg sync.WaitGroup
-	wg.Add(numKeys * numOpsPerKey)
 
 	errCount := atomic.Int32{}
 
-	for keyID := 0; keyID < numKeys; keyID++ {
-		keyID := keyID
+	for keyID := range numKeys {
 		key := cache.Key().
 			File("file1.txt").
 			String("key", fmt.Sprintf("key-%d", keyID)).
 			Build()
 
 		// For each key, launch: write, read, has, delete
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := cache.Put(key).Bytes("output", []byte("data")).Commit(); err != nil {
 				errCount.Add(1)
 			}
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := cache.Get(key); err != nil && !errors.Is(err, ErrCacheMiss) {
 				errCount.Add(1)
 			}
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cache.Has(key) // Has doesn't return errors
-		}()
+		})
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := cache.Delete(key); err != nil {
 				errCount.Add(1)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -421,17 +393,14 @@ func TestConcurrentSameKeyWrites(t *testing.T) {
 
 	const numWriters = 5
 	var wg sync.WaitGroup
-	wg.Add(numWriters)
 
-	for i := 0; i < numWriters; i++ {
-		i := i
-		go func() {
-			defer wg.Done()
+	for i := range numWriters {
+		wg.Go(func() {
 			cache.Put(key).
 				Bytes("output", []byte(fmt.Sprintf("writer-%d", i))).
 				Meta("writer", fmt.Sprintf("%d", i)).
 				Commit()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -446,7 +415,7 @@ func TestConcurrentSameKeyWrites(t *testing.T) {
 
 	// Data should be from one of the writers (not corrupted)
 	valid := false
-	for i := 0; i < numWriters; i++ {
+	for i := range numWriters {
 		if string(data) == fmt.Sprintf("writer-%d", i) {
 			valid = true
 			break
@@ -470,24 +439,20 @@ func TestConcurrentReadWriteSameKey(t *testing.T) {
 
 	const numOps = 10
 	var wg sync.WaitGroup
-	wg.Add(numOps)
 
-	for i := 0; i < numOps; i++ {
-		i := i
+	for i := range numOps {
 		if i%2 == 0 {
 			// Write
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				cache.Put(key).
 					Bytes("output", []byte(fmt.Sprintf("v%d", i))).
 					Commit()
-			}()
+			})
 		} else {
 			// Read
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				cache.Get(key)
-			}()
+			})
 		}
 	}
 
