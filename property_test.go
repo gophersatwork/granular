@@ -11,6 +11,13 @@ import (
 	"github.com/spf13/afero"
 )
 
+// randFill fills b with random bytes from r without using the deprecated (*rand.Rand).Read.
+func randFill(r *rand.Rand, b []byte) {
+	for i := range b {
+		b[i] = byte(r.Intn(256))
+	}
+}
+
 // TestProperty_HashDeterminism tests that same inputs always produce same hash
 func TestProperty_HashDeterminism(t *testing.T) {
 	property := func(seed int64) bool {
@@ -29,7 +36,7 @@ func TestProperty_HashDeterminism(t *testing.T) {
 		for i := range numFiles {
 			filename := fmt.Sprintf("file%d.txt", i)
 			content := make([]byte, r.Intn(100)+1)
-			r.Read(content)
+			randFill(r, content)
 			afero.WriteFile(fs, filename, content, 0o644)
 		}
 
@@ -136,12 +143,12 @@ func TestProperty_CacheIdempotency(t *testing.T) {
 
 		// Create test file
 		content := make([]byte, r.Intn(100)+10)
-		r.Read(content)
+		randFill(r, content)
 		afero.WriteFile(fs, "input.txt", content, 0o644)
 
 		// Create output data
 		outputData := make([]byte, r.Intn(50)+10)
-		r.Read(outputData)
+		randFill(r, outputData)
 
 		// Build key
 		key := cache.Key().File("input.txt").String("v", "1").Build()
@@ -199,7 +206,7 @@ func TestProperty_ManifestRoundTrip(t *testing.T) {
 		outputData := make(map[string][]byte)
 		for i := range numDataEntries {
 			data := make([]byte, r.Intn(50)+1)
-			r.Read(data)
+			randFill(r, data)
 			outputData[fmt.Sprintf("data%d", i)] = data
 		}
 
@@ -278,7 +285,7 @@ func TestProperty_BytesCopyImmutability(t *testing.T) {
 
 		// Create data
 		data := make([]byte, r.Intn(100)+10)
-		r.Read(data)
+		randFill(r, data)
 		originalData := make([]byte, len(data))
 		copy(originalData, data)
 
@@ -347,7 +354,7 @@ func TestProperty_DeleteIsEffective(t *testing.T) {
 
 		// Create test file
 		content := make([]byte, r.Intn(100)+10)
-		r.Read(content)
+		randFill(r, content)
 		afero.WriteFile(fs, "test.txt", content, 0o644)
 
 		// Store entry
@@ -540,8 +547,8 @@ func TestProperty_DifferentInputsDifferentHashes(t *testing.T) {
 		// Create two different files
 		content1 := make([]byte, r.Intn(100)+10)
 		content2 := make([]byte, r.Intn(100)+10)
-		r.Read(content1)
-		r.Read(content2)
+		randFill(r, content1)
+		randFill(r, content2)
 
 		// Ensure they're actually different
 		if reflect.DeepEqual(content1, content2) {

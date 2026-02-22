@@ -91,26 +91,36 @@ func (r *Result) CopyFile(name, dst string) error {
 }
 
 // Bytes returns byte data by name.
-// Returns nil if the data doesn't exist.
+// Returns nil if the data doesn't exist or if there's a read/decompression error.
 // Data is lazy-loaded from disk on first access and decompressed if needed.
+// Use BytesErr for explicit error handling.
 func (r *Result) Bytes(name string) []byte {
+	data, _ := r.BytesErr(name)
+	return data
+}
+
+// BytesErr returns byte data by name, with explicit error reporting.
+// Returns (nil, nil) if the data name doesn't exist in the cache entry.
+// Returns (nil, error) if the data exists but failed to read or decompress.
+// Data is lazy-loaded from disk on first access and decompressed if needed.
+func (r *Result) BytesErr(name string) ([]byte, error) {
 	// Check if already cached
 	if r.dataCache != nil {
 		if data, ok := r.dataCache[name]; ok {
-			return data
+			return data, nil
 		}
 	}
 
 	// Check if path exists
 	path, ok := r.dataPaths[name]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	// Lazy load from disk with decompression
 	data, err := r.readCompressedFile(path)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to read cached data %s: %w", name, err)
 	}
 
 	// Cache for future access
@@ -119,7 +129,7 @@ func (r *Result) Bytes(name string) []byte {
 	}
 	r.dataCache[name] = data
 
-	return data
+	return data, nil
 }
 
 // readCompressedFile reads a file and decompresses it if needed.
