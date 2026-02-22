@@ -11,6 +11,40 @@ import (
 	"github.com/spf13/afero"
 )
 
+// validateArchivePath checks that a path from an archive entry is safe to extract.
+// It rejects path traversal attempts (absolute paths, ".." components) and ensures
+// the resolved path stays within the target directory.
+func validateArchivePath(name, baseDir string) (string, error) {
+	// Reject absolute paths
+	if filepath.IsAbs(name) {
+		return "", fmt.Errorf("absolute path in archive: %s", name)
+	}
+
+	// Clean the path and reject any ".." components
+	cleaned := filepath.Clean(name)
+	if strings.Contains(cleaned, "..") {
+		return "", fmt.Errorf("path traversal in archive: %s", name)
+	}
+
+	// Join with base and verify the result is within baseDir
+	target := filepath.Join(baseDir, cleaned)
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve path %s: %w", name, err)
+	}
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base dir: %w", err)
+	}
+
+	// Ensure target is within base directory
+	if !strings.HasPrefix(absTarget, absBase+string(filepath.Separator)) && absTarget != absBase {
+		return "", fmt.Errorf("path escapes cache directory: %s", name)
+	}
+
+	return target, nil
+}
+
 // Export writes the entire cache contents to a tar archive.
 // The archive can be imported later with Import().
 func (c *Cache) Export(w io.Writer) error {
@@ -20,11 +54,21 @@ func (c *Cache) Export(w io.Writer) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
-	// Walk the cache root and add all files
+	// Walk the cache root and add all files.
+	// Uses Lstat to avoid following symlinks that could leak files outside the cache.
 	baseDir := c.root
 	return afero.Walk(c.fs, baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		// Skip symlinks to prevent leaking files outside the cache.
+		// afero.Walk uses Stat which follows symlinks, so we re-check with Lstat.
+		if lstater, ok := c.fs.(afero.Lstater); ok {
+			linfo, _, lErr := lstater.LstatIfPossible(path)
+			if lErr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
 		}
 
 		// Get relative path for archive
@@ -80,12 +124,16 @@ func (c *Cache) Import(r io.Reader) error {
 			return fmt.Errorf("failed to read tar header: %w", err)
 		}
 
-		// Validate path (security: prevent path traversal)
-		if strings.Contains(header.Name, "..") {
-			return fmt.Errorf("invalid path in archive: %s", header.Name)
+		// Reject symlinks and other non-regular types from archive
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			return fmt.Errorf("symlinks and hardlinks not allowed in archive: %s", header.Name)
 		}
 
-		targetPath := filepath.Join(baseDir, header.Name)
+		// Validate path (security: prevent path traversal, absolute paths, symlinks)
+		targetPath, err := validateArchivePath(header.Name, baseDir)
+		if err != nil {
+			return err
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:

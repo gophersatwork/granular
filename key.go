@@ -341,10 +341,11 @@ func (k Key) computeHash() (string, error) {
 
 	h := k.cache.newHash()
 
-	// Hash all inputs
+	// Hash all inputs with length-prefixed descriptors to prevent collisions
 	for _, hi := range k.inputs {
-		// Write input string representation for better determinism
-		h.Write([]byte(hi.String()))
+		desc := hi.String()
+		fmt.Fprintf(h, "%d:", len(desc))
+		h.Write([]byte(desc))
 		if err := hi.hash(h, k.cache.fs); err != nil {
 			return "", err
 		}
@@ -359,7 +360,11 @@ func (k Key) computeHash() (string, error) {
 		sort.Strings(keys)
 
 		for _, key := range keys {
+			// Length-prefix key and value to prevent collisions:
+			// String("ab","cd") vs String("a","bcd") must hash differently.
+			fmt.Fprintf(h, "%d:", len(key))
 			h.Write([]byte(key))
+			fmt.Fprintf(h, "%d:", len(k.extras[key]))
 			h.Write([]byte(k.extras[key]))
 		}
 	}

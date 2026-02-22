@@ -103,15 +103,22 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("failed to estimate entry size: %w", err)
 	}
 
-	// If max size is set, perform eviction under global lock
+	// If max size is set, perform eviction under exclusive global lock.
 	if wb.cache.maxSize > 0 {
 		wb.cache.mu.Lock()
 		if err := wb.cache.evictIfNeeded(requiredSpace); err != nil {
 			wb.cache.mu.Unlock()
+			wb.cache.metrics.error("put", err)
 			return fmt.Errorf("failed to evict entries: %w", err)
 		}
 		wb.cache.mu.Unlock()
 	}
+
+	// Hold global read lock during the write phase to prevent Clear() from
+	// removing directories while files are being written. Multiple Put()
+	// calls can proceed concurrently since they all hold RLock.
+	wb.cache.mu.RLock()
+	defer wb.cache.mu.RUnlock()
 
 	// Use per-key lock for concurrent writes to different keys
 	wb.cache.keyLocks.lockKey(keyHash)
@@ -123,14 +130,14 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("failed to create object directory: %w", err)
 	}
 
-	// Copy all files to cache
+	// Copy all files to cache.
+	// Uses "file.<name>.<ext>" as the destination to avoid basename collisions
+	// when different source paths share the same filename.
 	cachedFiles := make(map[string]string)
 	for name, srcPath := range wb.files {
-		// Generate destination filename (preserve basename)
-		dstName := filepath.Base(srcPath)
-		dstPath := filepath.Join(objectDir, dstName)
+		ext := filepath.Ext(srcPath)
+		dstPath := filepath.Join(objectDir, "file."+name+ext)
 
-		// Copy the file
 		if err := wb.copyFile(srcPath, dstPath); err != nil {
 			return fmt.Errorf("failed to copy file %s: %w", name, err)
 		}
@@ -138,11 +145,11 @@ func (wb *WriteBuilder) Commit() error {
 		cachedFiles[name] = dstPath
 	}
 
-	// Write byte data to cache as files atomically and track paths for manifest
+	// Write byte data to cache as files atomically and track paths for manifest.
+	// Uses "data.<name>.dat" as the destination to namespace separately from files.
 	cachedDataPaths := make(map[string]string, len(wb.data))
 	for name, data := range wb.data {
-		// Store data as a file with .dat extension
-		dstPath := filepath.Join(objectDir, name+".dat")
+		dstPath := filepath.Join(objectDir, "data."+name+".dat")
 		if err := wb.writeDataFile(dstPath, data); err != nil {
 			return fmt.Errorf("failed to write data %s: %w", name, err)
 		}
@@ -212,12 +219,7 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source: %w", err)
 	}
-	defer func(srcFile afero.File) {
-		err := srcFile.Close()
-		if err != nil {
-			fmt.Printf("failed to close file %s: %v\n", src, err)
-		}
-	}(srcFile)
+	defer func() { _ = srcFile.Close() }()
 
 	// Write to temp file first for atomic operation
 	tmpPath := dst + ".tmp." + randomSuffix()
@@ -242,8 +244,8 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
-	if closeErr := dstFile.Close(); closeErr != nil {
-		fmt.Printf("failed to close file %s: %v\n", tmpPath, closeErr)
+	if closeErr := dstFile.Close(); closeErr != nil && err == nil {
+		err = closeErr
 	}
 	if err != nil {
 		// Cleanup temp file on copy failure
@@ -281,8 +283,8 @@ func (wb *WriteBuilder) writeDataFile(dst string, data []byte) error {
 	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
-	if closeErr := dstFile.Close(); closeErr != nil {
-		fmt.Printf("failed to close file %s: %v\n", tmpPath, closeErr)
+	if closeErr := dstFile.Close(); closeErr != nil && err == nil {
+		err = closeErr
 	}
 	if err != nil {
 		_ = wb.cache.fs.Remove(tmpPath)
@@ -300,7 +302,8 @@ func (wb *WriteBuilder) writeDataFile(dst string, data []byte) error {
 
 // estimateSize calculates the approximate size of the data to be written.
 // This includes all files and byte data that will be stored in the objects directory.
-// Note: This matches what dirSize() measures (only object directory contents).
+// Note: This is a pre-compression estimate. With compression enabled, actual stored
+// size will be smaller than this estimate.
 func (wb *WriteBuilder) estimateSize() (int64, error) {
 	var totalSize int64
 

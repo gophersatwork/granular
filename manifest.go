@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/spf13/afero"
@@ -68,7 +68,7 @@ type manifest struct {
 	OutputData  map[string]string `json:"outputData"` // name -> path to .dat file
 	OutputMeta  map[string]string `json:"outputMeta"` // metadata key-value pairs
 	OutputHash  string            `json:"outputHash"` // Hash of outputs
-	Compression CompressionType   `json:"compression,omitempty"`
+	Compression CompressionType   `json:"compression,omitzero"`
 
 	// Metadata
 	CreatedAt  time.Time `json:"createdAt"`  // When the cache entry was created
@@ -126,38 +126,14 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	// Hash the number of outputs first
 	h.Write([]byte(fmt.Sprintf("%d", len(outputs))))
 
-	// Hash each output file
+	// Hash each output file with length-prefixed path to prevent collisions
 	for _, output := range outputs {
-		// Hash the filename first
+		fmt.Fprintf(h, "%d:", len(output))
 		h.Write([]byte(output))
 
-		// Then hash the file content
-		// Open the file
-		file, err := c.fs.Open(output)
-		if err != nil {
-			return "", fmt.Errorf("failed to open output file %s: %w", output, err)
+		if err := c.hashOutputFile(h, output); err != nil {
+			return "", err
 		}
-
-		// Get a buffer from the pool
-		bufPtr := bufferPool.Get().(*[]byte)
-		buffer := *bufPtr
-
-		// Hash the file content
-		for {
-			n, err := file.Read(buffer)
-			if err != nil && err != io.EOF {
-				return "", fmt.Errorf("failed to read output file %s: %w", output, err)
-			}
-			if n > 0 {
-				h.Write(buffer[:n])
-			}
-			if err == io.EOF {
-				break
-			}
-		}
-
-		bufferPool.Put(bufPtr)
-		_ = file.Close()
 	}
 
 	// Hash output data
@@ -171,12 +147,10 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	// Hash the number of data entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(dataKeys))))
 
-	// Hash each data entry
+	// Hash each data entry with length-prefixed key to prevent collisions
 	for _, k := range dataKeys {
-		// Hash the key first
+		fmt.Fprintf(h, "%d:", len(k))
 		h.Write([]byte(k))
-
-		// Then hash the data
 		h.Write(outputData[k])
 	}
 
@@ -191,12 +165,11 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	// Hash the number of meta entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(metaKeys))))
 
-	// Hash each meta entry
+	// Hash each meta entry with length-prefixed encoding to prevent collisions
 	for _, k := range metaKeys {
-		// Hash the key first
+		fmt.Fprintf(h, "%d:", len(k))
 		h.Write([]byte(k))
-
-		// Then hash the value
+		fmt.Fprintf(h, "%d:", len(outputMeta[k]))
 		h.Write([]byte(outputMeta[k]))
 	}
 
@@ -204,10 +177,39 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// hashOutputFile hashes a single output file's content into h.
+// Properly defers buffer pool return to avoid leaks on error.
+func (c *Cache) hashOutputFile(h io.Writer, path string) error {
+	file, err := c.fs.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open output file %s: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	bufPtr := bufferPool.Get().(*[]byte)
+	buffer := *bufPtr
+	defer bufferPool.Put(bufPtr)
+
+	for {
+		n, readErr := file.Read(buffer)
+		if readErr != nil && readErr != io.EOF {
+			return fmt.Errorf("failed to read output file %s: %w", path, readErr)
+		}
+		if n > 0 {
+			h.Write(buffer[:n])
+		}
+		if readErr == io.EOF {
+			break
+		}
+	}
+
+	return nil
+}
+
 // sortStrings sorts a slice of strings in place.
 // This is a helper function to avoid importing sort in multiple places.
 func sortStrings(s []string) {
-	sort.Strings(s)
+	slices.Sort(s)
 }
 
 // verifyOutputHash recomputes the output hash from cached files and data,

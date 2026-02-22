@@ -95,11 +95,14 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 		return 0, err
 	}
 
-	// Remove entries
+	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
 	for _, entry := range toRemove {
+		c.keyLocks.lockKey(entry.keyHash)
 		if err := c.removeByHash(entry.keyHash); err != nil {
+			c.keyLocks.unlockKey(entry.keyHash)
 			return count, fmt.Errorf("failed to remove entry %s: %w", entry.keyHash, err)
 		}
+		c.keyLocks.unlockKey(entry.keyHash)
 		c.metrics.evict(entry.keyHash, entry.size, EvictReasonExpired)
 		count++
 	}
@@ -134,11 +137,14 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 		return 0, err
 	}
 
-	// Remove entries
+	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
 	for _, entry := range toRemove {
+		c.keyLocks.lockKey(entry.keyHash)
 		if err := c.removeByHash(entry.keyHash); err != nil {
+			c.keyLocks.unlockKey(entry.keyHash)
 			return count, fmt.Errorf("failed to remove entry %s: %w", entry.keyHash, err)
 		}
+		c.keyLocks.unlockKey(entry.keyHash)
 		c.metrics.evict(entry.keyHash, entry.size, EvictReasonExpired)
 		count++
 	}
@@ -200,7 +206,8 @@ func (c *Cache) walkManifests(fn func(keyHash string, m *manifest) error) error 
 		// Load manifest
 		m, err := c.loadManifest(keyHash)
 		if err != nil {
-			// Skip corrupted manifests
+			// Skip corrupted manifests but report via metrics
+			c.metrics.error("walkManifests", fmt.Errorf("corrupted manifest %s: %w", keyHash, err))
 			return nil
 		}
 

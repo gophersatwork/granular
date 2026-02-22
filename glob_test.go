@@ -2,7 +2,6 @@ package granular
 
 import (
 	"errors"
-	"os"
 	"sort"
 	"sync/atomic"
 	"testing"
@@ -577,44 +576,6 @@ func TestGlobExcludeInDir(t *testing.T) {
 			t.Error("Hash should not be empty")
 		}
 	})
-}
-
-// walkCountingFs wraps an afero.Fs to count the number of Walk calls.
-type walkCountingFs struct {
-	afero.Fs
-	walkCount atomic.Int64
-}
-
-func (w *walkCountingFs) Open(name string) (afero.File, error) {
-	return w.Fs.Open(name)
-}
-
-func (w *walkCountingFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	return w.Fs.OpenFile(name, flag, perm)
-}
-
-// Walk is called by afero.Walk, but afero.Walk actually uses Open/ReadDir internally.
-// We need to intercept at the ReadDir level on directories.
-
-// walkCountingFile wraps afero.File to count Readdir calls.
-type walkCountingFile struct {
-	afero.File
-	fs *walkCountingFs
-}
-
-func (f *walkCountingFile) Readdir(count int) ([]os.FileInfo, error) {
-	f.fs.walkCount.Add(1)
-	return f.File.Readdir(count)
-}
-
-func (f *walkCountingFile) Readdirnames(n int) ([]string, error) {
-	f.fs.walkCount.Add(1)
-	return f.File.Readdirnames(n)
-}
-
-// newWalkCountingFs creates a filesystem that counts directory reads (walks).
-func newWalkCountingFs(base afero.Fs) *walkCountingFs {
-	return &walkCountingFs{Fs: base}
 }
 
 // openCountingFs tracks Open calls for directories to count walks.

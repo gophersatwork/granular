@@ -88,7 +88,7 @@ func FuzzManifestFields(f *testing.F) {
 		_ = json.Unmarshal(data, &m2)
 
 		// Round-trip should preserve non-nil maps
-		if m2.ExtraData != nil && len(m2.ExtraData) > 0 {
+		if len(m2.ExtraData) > 0 {
 			if m2.ExtraData[extraKey] != extraVal {
 				t.Errorf("Extra data mismatch after round-trip")
 			}

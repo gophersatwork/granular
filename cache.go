@@ -12,6 +12,10 @@ import (
 	"github.com/spf13/afero"
 )
 
+// hashPrefixLen is the number of characters from the key hash used for
+// two-level directory sharding (e.g., "ab" from "abcdef123...").
+const hashPrefixLen = 2
+
 // Cache represents the main cache structure.
 // It provides content-addressed storage for files and data.
 type Cache struct {
@@ -110,6 +114,7 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	manifestPath := c.manifestPath(keyHash)
 	exists, err := afero.Exists(c.fs, manifestPath)
 	if err != nil {
+		c.metrics.error("get", err)
 		return nil, fmt.Errorf("failed to check manifest: %w", err)
 	}
 	if !exists {
@@ -120,6 +125,7 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	// Load manifest
 	m, err := c.loadManifest(keyHash)
 	if err != nil {
+		c.metrics.error("get", err)
 		return nil, fmt.Errorf("failed to load manifest: %w", err)
 	}
 
@@ -137,15 +143,14 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	if err := c.verifyOutputHash(m); err != nil {
 		// Delete corrupted entry
 		_ = c.deleteByKeyHash(keyHash)
+		c.metrics.error("get", ErrCacheCorrupted)
 		return nil, ErrCacheCorrupted
 	}
 
-	// Update access time and save
+	// Update access time — best effort, does not affect cache hit validity
 	m.AccessedAt = c.now()
 	if err := c.saveManifest(m); err != nil {
-		// Log but don't fail - the cache hit is still valid
-		// The access time just won't be updated
-		return nil, fmt.Errorf("failed to update manifest access time: %w", err)
+		c.metrics.error("get:update_access", err)
 	}
 
 	// Build result with lazy-loading for data
@@ -202,9 +207,29 @@ func (c *Cache) Put(key Key) *WriteBuilder {
 
 // Has checks if a key exists in the cache.
 // Returns false if the key doesn't exist or if there's an error.
+//
+// Unlike Get, Has does not update the entry's access time and does not
+// verify output hash integrity. It only checks for manifest existence.
+//
+// Note: Has is advisory — the result may be stale by the time the caller acts on it.
+// Another goroutine could delete or overwrite the entry between Has() and a subsequent Get().
+// For atomic check-and-use, call Get() directly and handle ErrCacheMiss.
 func (c *Cache) Has(key Key) bool {
-	result, err := c.Get(key)
-	return err == nil && result != nil
+	if len(key.errors) > 0 {
+		return false
+	}
+
+	keyHash, err := key.computeHash()
+	if err != nil {
+		return false
+	}
+
+	c.keyLocks.lockKey(keyHash)
+	defer c.keyLocks.unlockKey(keyHash)
+
+	manifestPath := c.manifestPath(keyHash)
+	exists, err := afero.Exists(c.fs, manifestPath)
+	return err == nil && exists
 }
 
 // Delete removes a cache entry by key.
@@ -224,6 +249,7 @@ func (c *Cache) Delete(key Key) error {
 	entrySize, _ := c.dirSize(objectDir)
 
 	if err := c.deleteByKeyHash(keyHash); err != nil {
+		c.metrics.error("delete", err)
 		return err
 	}
 
@@ -266,9 +292,11 @@ func (c *Cache) Clear() error {
 
 	// Remove everything
 	if err := c.fs.RemoveAll(c.manifestDir()); err != nil {
+		c.metrics.error("clear", err)
 		return fmt.Errorf("failed to remove manifests: %w", err)
 	}
 	if err := c.fs.RemoveAll(c.objectsDir()); err != nil {
+		c.metrics.error("clear", err)
 		return fmt.Errorf("failed to remove objects: %w", err)
 	}
 
@@ -306,19 +334,19 @@ func (c *Cache) objectsDir() string {
 
 // manifestPath returns the path to a manifest file for a given key hash.
 func (c *Cache) manifestPath(keyHash string) string {
-	if len(keyHash) < 2 {
+	if len(keyHash) < hashPrefixLen {
 		panic(fmt.Sprintf("key hash too short: %s", keyHash))
 	}
-	prefix := keyHash[:2]
+	prefix := keyHash[:hashPrefixLen]
 	return filepath.Join(c.manifestDir(), prefix, keyHash+".json")
 }
 
 // objectPath returns the path to the object directory for a given key hash.
 func (c *Cache) objectPath(keyHash string) string {
-	if len(keyHash) < 2 {
+	if len(keyHash) < hashPrefixLen {
 		panic(fmt.Sprintf("key hash too short: %s", keyHash))
 	}
-	prefix := keyHash[:2]
+	prefix := keyHash[:hashPrefixLen]
 	return filepath.Join(c.objectsDir(), prefix, keyHash)
 }
 
@@ -367,14 +395,18 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 		return entries[i].AccessedAt.Before(entries[j].AccessedAt)
 	})
 
-	// Evict until we have enough space
+	// Evict until we have enough space.
+	// Acquire per-key lock for each entry to prevent races with concurrent Get().
 	for _, entry := range entries {
 		if currentSize+requiredSpace <= c.maxSize {
 			break
 		}
+		c.keyLocks.lockKey(entry.KeyHash)
 		if err := c.removeByHash(entry.KeyHash); err != nil {
+			c.keyLocks.unlockKey(entry.KeyHash)
 			return fmt.Errorf("failed to evict entry %s: %w", entry.KeyHash, err)
 		}
+		c.keyLocks.unlockKey(entry.KeyHash)
 		c.metrics.evict(entry.KeyHash, entry.Size, EvictReasonLRU)
 		currentSize -= entry.Size
 	}

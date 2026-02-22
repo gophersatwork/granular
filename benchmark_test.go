@@ -2,6 +2,7 @@ package granular
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -30,7 +31,7 @@ func BenchmarkCacheGet_Hit(b *testing.B) {
 	cache.Put(key).Bytes("output", []byte("cached data")).Commit()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := cache.Get(key)
 		if err != nil {
 			b.Fatal(err)
@@ -46,12 +47,14 @@ func BenchmarkCacheGet_Miss(b *testing.B) {
 	afero.WriteFile(fs, "test.txt", []byte("test content"), 0o644)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := cache.Key().File("test.txt").String("iter", fmt.Sprintf("%d", i)).Build()
 		_, err := cache.Get(key)
 		if err != ErrCacheMiss {
 			b.Fatalf("Expected cache miss, got: %v", err)
 		}
+		i++
 	}
 }
 
@@ -68,12 +71,14 @@ func BenchmarkCachePut_SingleFile(b *testing.B) {
 	afero.WriteFile(fs, "input.txt", content, 0o644)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := cache.Key().File("input.txt").String("iter", fmt.Sprintf("%d", i)).Build()
 		err := cache.Put(key).Bytes("output", []byte("result")).Commit()
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -83,7 +88,7 @@ func BenchmarkCachePut_MultiFile(b *testing.B) {
 	defer cache.Close()
 
 	// Create 10 test files
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		content := make([]byte, 512)
 		for j := range content {
 			content[j] = byte((i + j) % 256)
@@ -92,7 +97,8 @@ func BenchmarkCachePut_MultiFile(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := cache.Key().
 			File("file0.txt").
 			File("file1.txt").
@@ -103,13 +109,14 @@ func BenchmarkCachePut_MultiFile(b *testing.B) {
 			Build()
 
 		wb := cache.Put(key)
-		for j := 0; j < 5; j++ {
+		for j := range 5 {
 			wb = wb.Bytes(fmt.Sprintf("out%d", j), []byte(fmt.Sprintf("data%d", j)))
 		}
 		err := wb.Commit()
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -127,12 +134,14 @@ func BenchmarkCachePut_LargeFile(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := cache.Key().File("large.bin").String("iter", fmt.Sprintf("%d", i)).Build()
 		err := cache.Put(key).Bytes("output", []byte("done")).Commit()
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -148,7 +157,7 @@ func BenchmarkKeyHash_SingleFile(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := key.computeHash()
 		if err != nil {
 			b.Fatal(err)
@@ -163,7 +172,7 @@ func BenchmarkKeyHash_Glob10Files(b *testing.B) {
 
 	// Create 10 files
 	fs.MkdirAll("src", 0o755)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		content := make([]byte, 512)
 		for j := range content {
 			content[j] = byte((i + j) % 256)
@@ -175,7 +184,7 @@ func BenchmarkKeyHash_Glob10Files(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := key.computeHash()
 		if err != nil {
 			b.Fatal(err)
@@ -189,10 +198,10 @@ func BenchmarkKeyHash_Glob100Files(b *testing.B) {
 	defer cache.Close()
 
 	// Create 100 files in nested directories
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		dir := fmt.Sprintf("pkg%d", i)
 		fs.MkdirAll(dir, 0o755)
-		for j := 0; j < 10; j++ {
+		for j := range 10 {
 			content := make([]byte, 256)
 			for k := range content {
 				content[k] = byte((i + j + k) % 256)
@@ -205,7 +214,7 @@ func BenchmarkKeyHash_Glob100Files(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := key.computeHash()
 		if err != nil {
 			b.Fatal(err)
@@ -230,7 +239,7 @@ func BenchmarkKeyHash_LargeFile(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	b.SetBytes(int64(len(content)))
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := key.computeHash()
 		if err != nil {
 			b.Fatal(err)
@@ -265,13 +274,12 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 
 	afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
 
-	var counter int64
+	var counter atomic.Int64
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			// Each goroutine writes to a unique key
-			id := fmt.Sprintf("%d", counter)
-			counter++
+			id := fmt.Sprintf("%d", counter.Add(1))
 			key := cache.Key().File("test.txt").String("id", id).Build()
 			err := cache.Put(key).Bytes("output", []byte("data")).Commit()
 			if err != nil {
@@ -300,7 +308,7 @@ func BenchmarkManifestSave(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		err := cache.saveManifest(m)
 		if err != nil {
 			b.Fatal(err)
@@ -329,7 +337,7 @@ func BenchmarkManifestLoad(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := cache.loadManifest("abc123def456")
 		if err != nil {
 			b.Fatal(err)
@@ -342,10 +350,10 @@ func BenchmarkGlobExpansion(b *testing.B) {
 	fs := afero.NewMemMapFs()
 
 	// Create test structure
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		dir := fmt.Sprintf("dir%d", i)
 		fs.MkdirAll(dir, 0o755)
-		for j := 0; j < 10; j++ {
+		for j := range 10 {
 			afero.WriteFile(fs, fmt.Sprintf("%s/file%d.go", dir, j), []byte("code"), 0o644)
 			afero.WriteFile(fs, fmt.Sprintf("%s/file%d.txt", dir, j), []byte("text"), 0o644)
 		}
@@ -353,7 +361,7 @@ func BenchmarkGlobExpansion(b *testing.B) {
 
 	b.Run("SimplePattern", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := expandGlob("dir0/*.go", fs)
 			if err != nil {
 				b.Fatal(err)
@@ -363,7 +371,7 @@ func BenchmarkGlobExpansion(b *testing.B) {
 
 	b.Run("RecursivePattern", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := expandGlob("**/*.go", fs)
 			if err != nil {
 				b.Fatal(err)
@@ -389,10 +397,12 @@ func BenchmarkMatchGlobPattern(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		path := paths[i%len(paths)]
 		pattern := patterns[i%len(patterns)]
 		matchesGlobPattern(path, pattern)
+		i++
 	}
 }
 
@@ -403,14 +413,14 @@ func BenchmarkStatsSmallCache(b *testing.B) {
 
 	// Create 10 entries
 	afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := cache.Key().File("test.txt").String("id", fmt.Sprintf("%d", i)).Build()
 		cache.Put(key).Bytes("output", []byte("data")).Commit()
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := cache.Stats()
 		if err != nil {
 			b.Fatal(err)
@@ -425,14 +435,14 @@ func BenchmarkStatsLargeCache(b *testing.B) {
 
 	// Create 100 entries
 	afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := cache.Key().File("test.txt").String("id", fmt.Sprintf("%d", i)).Build()
 		cache.Put(key).Bytes("output", []byte("data")).Commit()
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := cache.Stats()
 		if err != nil {
 			b.Fatal(err)
@@ -450,7 +460,7 @@ func BenchmarkHas(b *testing.B) {
 	cache.Put(key).Bytes("output", []byte("data")).Commit()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		cache.Has(key)
 	}
 }
@@ -463,7 +473,8 @@ func BenchmarkDelete(b *testing.B) {
 	afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		b.StopTimer()
 		// Create entry
 		key := cache.Key().File("test.txt").String("iter", fmt.Sprintf("%d", i)).Build()
@@ -475,6 +486,7 @@ func BenchmarkDelete(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -489,7 +501,7 @@ func BenchmarkKeyBuilder(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		cache.Key().
 			File("file1.txt").
 			File("file2.txt").
@@ -507,17 +519,16 @@ func BenchmarkConcurrentMixedOperations(b *testing.B) {
 
 	// Pre-populate with some entries
 	afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := cache.Key().File("test.txt").String("id", fmt.Sprintf("%d", i)).Build()
 		cache.Put(key).Bytes("output", []byte("data")).Commit()
 	}
 
 	b.ResetTimer()
-	var counter int64
+	var counter atomic.Int64
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			id := counter % 20
-			counter++
+			id := counter.Add(1) % 20
 			key := cache.Key().File("test.txt").String("id", fmt.Sprintf("%d", id)).Build()
 
 			// Mixed operations: 50% read, 30% write, 20% has

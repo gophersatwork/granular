@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,10 +55,10 @@ func TestExportCreatesValidTar(t *testing.T) {
 	hasManifest := false
 	hasObject := false
 	for name := range foundFiles {
-		if filepath.HasPrefix(name, "manifests") {
+		if strings.HasPrefix(filepath.ToSlash(name), "manifests") {
 			hasManifest = true
 		}
-		if filepath.HasPrefix(name, "objects") {
+		if strings.HasPrefix(filepath.ToSlash(name), "objects") {
 			hasObject = true
 		}
 	}
@@ -193,9 +194,9 @@ func TestImportRejectsPathTraversal(t *testing.T) {
 		t.Fatal("Expected Import to reject path traversal attack")
 	}
 
-	// Verify error message mentions the invalid path
-	if !bytes.Contains([]byte(err.Error()), []byte("invalid path")) {
-		t.Fatalf("Expected error about invalid path, got: %v", err)
+	// Verify error message mentions the path traversal
+	if !bytes.Contains([]byte(err.Error()), []byte("path traversal")) {
+		t.Fatalf("Expected error about path traversal, got: %v", err)
 	}
 }
 

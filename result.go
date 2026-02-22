@@ -5,8 +5,6 @@ import (
 	"io"
 	"path/filepath"
 	"time"
-
-	"github.com/spf13/afero"
 )
 
 // Result represents a cached result with support for multiple files and data.
@@ -65,12 +63,7 @@ func (r *Result) CopyFile(name, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open cached file %s: %w", src, err)
 	}
-	defer func(srcFile afero.File) {
-		err := srcFile.Close()
-		if err != nil {
-			fmt.Printf("failed to close file %s: %v\n", srcFile.Name(), err)
-		}
-	}(srcFile)
+	defer func() { _ = srcFile.Close() }()
 
 	// Wrap with decompression if needed
 	reader, err := decompressReader(srcFile, r.compression)
@@ -83,12 +76,7 @@ func (r *Result) CopyFile(name, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}
-	defer func(dstFile afero.File) {
-		err := dstFile.Close()
-		if err != nil {
-			fmt.Printf("failed to close file %s: %v\n", dstFile.Name(), err)
-		}
-	}(dstFile)
+	defer func() { _ = dstFile.Close() }()
 
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
@@ -207,11 +195,17 @@ func (r *Result) AccessedAt() time.Time {
 	return r.accessedAt
 }
 
-// Size returns the total size of all cached files in bytes.
+// Size returns the total size of all cached files and data in bytes.
 // Returns 0 if unable to determine size.
 func (r *Result) Size() int64 {
 	var total int64
 	for _, path := range r.files {
+		info, err := r.cache.fs.Stat(path)
+		if err == nil {
+			total += info.Size()
+		}
+	}
+	for _, path := range r.dataPaths {
 		info, err := r.cache.fs.Stat(path)
 		if err == nil {
 			total += info.Size()

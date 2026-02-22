@@ -178,7 +178,7 @@ In-memory cache for testing:
 Custom hash function:
 
 	cache, err := granular.Open(".cache",
-	    granular.WithHashFunc(myHashFunc))
+	    granular.WithHashFunc("fnv128", fnv.New128))
 
 # Error Handling
 
@@ -203,8 +203,7 @@ Validation errors are collected and returned:
 	    Build()                  // Always succeeds (no error)
 
 	result, err := cache.Get(key)  // Errors surface here
-	var validationErr *granular.ValidationError
-	if errors.As(err, &validationErr) {
+	if validationErr, ok := errors.AsType[*granular.ValidationError](err); ok {
 	    for _, e := range validationErr.Errors {
 	        fmt.Printf("- %v\n", e)
 	    }
@@ -229,8 +228,8 @@ The cache uses the following directory structure:
 	└── objects/
 	    └── ab/
 	        └── abcd1234.../
-	            ├── output.txt (cached files)
-	            └── data.dat (cached byte data)
+	            ├── file.output.txt (cached files)
+	            └── data.result.dat (cached byte data)
 
 # Performance Considerations
 
