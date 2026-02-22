@@ -121,7 +121,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 
 	// Hash output files
 	// Sort for deterministic ordering
-	sortStrings(outputs)
+	slices.Sort(outputs)
 
 	// Hash the number of outputs first
 	h.Write([]byte(fmt.Sprintf("%d", len(outputs))))
@@ -142,7 +142,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	for k := range outputData {
 		dataKeys = append(dataKeys, k)
 	}
-	sortStrings(dataKeys)
+	slices.Sort(dataKeys)
 
 	// Hash the number of data entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(dataKeys))))
@@ -160,7 +160,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	for k := range outputMeta {
 		metaKeys = append(metaKeys, k)
 	}
-	sortStrings(metaKeys)
+	slices.Sort(metaKeys)
 
 	// Hash the number of meta entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(metaKeys))))
@@ -204,12 +204,6 @@ func (c *Cache) hashOutputFile(h io.Writer, path string) error {
 	}
 
 	return nil
-}
-
-// sortStrings sorts a slice of strings in place.
-// This is a helper function to avoid importing sort in multiple places.
-func sortStrings(s []string) {
-	slices.Sort(s)
 }
 
 // verifyOutputHash recomputes the output hash from cached files and data,

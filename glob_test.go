@@ -2,7 +2,7 @@ package granular
 
 import (
 	"errors"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -81,8 +81,8 @@ func TestExpandGlob_SimplePatterns(t *testing.T) {
 				t.Fatalf("expandGlob failed: %v", err)
 			}
 
-			sort.Strings(matches)
-			sort.Strings(tt.expected)
+			slices.Sort(matches)
+			slices.Sort(tt.expected)
 
 			if len(matches) != len(tt.expected) {
 				t.Fatalf("got %d matches, want %d\nGot: %v\nWant: %v",
@@ -165,8 +165,8 @@ func TestExpandGlob_RecursivePatterns(t *testing.T) {
 				t.Fatalf("expandGlob failed: %v", err)
 			}
 
-			sort.Strings(matches)
-			sort.Strings(tt.expected)
+			slices.Sort(matches)
+			slices.Sort(tt.expected)
 
 			if len(matches) != len(tt.expected) {
 				t.Fatalf("got %d matches, want %d\nGot: %v\nWant: %v",

@@ -6,7 +6,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/spf13/afero"
@@ -79,7 +79,7 @@ func (g globInput) hash(h hash.Hash, fs afero.Fs) error {
 	}
 
 	// Sort for deterministic ordering (may already be sorted)
-	sort.Strings(matches)
+	slices.Sort(matches)
 
 	// Hash count of matches
 	_, _ = fmt.Fprintf(h, "%d", len(matches))
@@ -140,7 +140,7 @@ func (d dirInput) hash(h hash.Hash, fs afero.Fs) error {
 	}
 
 	// Sort for deterministic ordering
-	sort.Strings(files)
+	slices.Sort(files)
 
 	// Hash count of files
 	_, _ = fmt.Fprintf(h, "%d", len(files))
@@ -357,7 +357,7 @@ func (k Key) computeHash() (string, error) {
 		for k := range k.extras {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 
 		for _, key := range keys {
 			// Length-prefix key and value to prevent collisions:

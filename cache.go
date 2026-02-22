@@ -1,10 +1,11 @@
 package granular
 
 import (
+	"cmp"
 	"fmt"
 	"hash"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -391,8 +392,8 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 	}
 
 	// Sort by AccessedAt ascending (oldest/least recently accessed first)
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].AccessedAt.Before(entries[j].AccessedAt)
+	slices.SortFunc(entries, func(a, b Entry) int {
+		return cmp.Compare(a.AccessedAt.UnixNano(), b.AccessedAt.UnixNano())
 	})
 
 	// Evict until we have enough space.
