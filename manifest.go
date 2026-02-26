@@ -79,8 +79,13 @@ type manifest struct {
 // saveManifest saves a manifest to disk using the cache's filesystem.
 // Uses atomic write pattern to prevent corruption from crashes during write.
 func (c *Cache) saveManifest(m *manifest) error {
+	mPath, err := c.manifestPath(m.KeyHash)
+	if err != nil {
+		return err
+	}
+
 	// Create the manifest directory if it doesn't exist
-	manifestDir := filepath.Dir(c.manifestPath(m.KeyHash))
+	manifestDir := filepath.Dir(mPath)
 	if err := c.fs.MkdirAll(manifestDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create manifest directory: %w", err)
 	}
@@ -92,7 +97,7 @@ func (c *Cache) saveManifest(m *manifest) error {
 	}
 
 	// Write atomically using temp file + rename
-	if err := atomicWriteFile(c.fs, c.manifestPath(m.KeyHash), data, 0o644); err != nil {
+	if err := atomicWriteFile(c.fs, mPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 
@@ -101,8 +106,13 @@ func (c *Cache) saveManifest(m *manifest) error {
 
 // loadManifest loads a manifest from disk using the cache's filesystem.
 func (c *Cache) loadManifest(keyHash string) (*manifest, error) {
+	mPath, err := c.manifestPath(keyHash)
+	if err != nil {
+		return nil, err
+	}
+
 	// Read the manifest file
-	data, err := afero.ReadFile(c.fs, c.manifestPath(keyHash))
+	data, err := afero.ReadFile(c.fs, mPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}

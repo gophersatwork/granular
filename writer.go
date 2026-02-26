@@ -2,6 +2,7 @@ package granular
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -128,7 +129,10 @@ func (wb *WriteBuilder) Commit() error {
 	defer wb.cache.keyLocks.unlockKey(keyHash)
 
 	// Create object directory
-	objectDir := wb.cache.objectPath(keyHash)
+	objectDir, err := wb.cache.objectPath(keyHash)
+	if err != nil {
+		return err
+	}
 	if err := wb.cache.fs.MkdirAll(objectDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create object directory: %w", err)
 	}
@@ -240,15 +244,10 @@ func (wb *WriteBuilder) copyFile(src, dst string) error {
 		return fmt.Errorf("failed to create compressor: %w", err)
 	}
 
-	_, err = io.CopyBuffer(compWriter, srcFile, buffer)
-	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if closeErr := dstFile.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		// Cleanup temp file on copy failure
+	_, copyErr := io.CopyBuffer(compWriter, srcFile, buffer)
+	compCloseErr := compWriter.Close()
+	fileCloseErr := dstFile.Close()
+	if err := errors.Join(copyErr, compCloseErr, fileCloseErr); err != nil {
 		_ = wb.cache.fs.Remove(tmpPath)
 		return fmt.Errorf("failed to copy: %w", err)
 	}
@@ -279,14 +278,10 @@ func (wb *WriteBuilder) writeDataFile(dst string, data []byte) error {
 		return fmt.Errorf("failed to create compressor: %w", err)
 	}
 
-	_, err = compWriter.Write(data)
-	if closeErr := compWriter.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if closeErr := dstFile.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if err != nil {
+	_, writeErr := compWriter.Write(data)
+	compCloseErr := compWriter.Close()
+	fileCloseErr := dstFile.Close()
+	if err := errors.Join(writeErr, compCloseErr, fileCloseErr); err != nil {
 		_ = wb.cache.fs.Remove(tmpPath)
 		return fmt.Errorf("failed to write data: %w", err)
 	}
@@ -302,8 +297,11 @@ func (wb *WriteBuilder) writeDataFile(dst string, data []byte) error {
 
 // estimateSize calculates the approximate size of the data to be written.
 // This includes all files and byte data that will be stored in the objects directory.
-// Note: This is a pre-compression estimate. With compression enabled, actual stored
-// size will be smaller than this estimate.
+//
+// This is a pre-compression estimate. With compression enabled, actual stored size
+// may be smaller (compressible data) or similar (incompressible data like images/archives).
+// The estimate is used conservatively for eviction: over-estimating may cause extra
+// evictions but never allows the cache to exceed maxSize silently.
 func (wb *WriteBuilder) estimateSize() (int64, error) {
 	var totalSize int64
 

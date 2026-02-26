@@ -34,32 +34,39 @@ const (
 )
 
 // helper to safely call hooks.
+// All hooks are wrapped with recover() to prevent user-provided callbacks
+// from panicking and crashing cache operations.
 func (h *MetricsHooks) hit(keyHash string, size int64) {
 	if h != nil && h.OnHit != nil {
+		defer func() { recover() }()
 		h.OnHit(keyHash, size)
 	}
 }
 
 func (h *MetricsHooks) miss(keyHash string) {
 	if h != nil && h.OnMiss != nil {
+		defer func() { recover() }()
 		h.OnMiss(keyHash)
 	}
 }
 
 func (h *MetricsHooks) put(keyHash string, size int64, duration time.Duration) {
 	if h != nil && h.OnPut != nil {
+		defer func() { recover() }()
 		h.OnPut(keyHash, size, duration)
 	}
 }
 
 func (h *MetricsHooks) evict(keyHash string, size int64, reason EvictReason) {
 	if h != nil && h.OnEvict != nil {
+		defer func() { recover() }()
 		h.OnEvict(keyHash, size, reason)
 	}
 }
 
 func (h *MetricsHooks) error(op string, err error) {
 	if h != nil && h.OnError != nil {
+		defer func() { recover() }()
 		h.OnError(op, err)
 	}
 }

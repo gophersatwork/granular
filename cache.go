@@ -118,7 +118,10 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	defer c.keyLocks.unlockKey(keyHash)
 
 	// Check if manifest exists
-	manifestPath := c.manifestPath(keyHash)
+	manifestPath, err := c.manifestPath(keyHash)
+	if err != nil {
+		return nil, err
+	}
 	exists, err := afero.Exists(c.fs, manifestPath)
 	if err != nil {
 		c.metrics.error("get", err)
@@ -144,6 +147,12 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	}
 	if manifestHashAlgo != c.hashAlgoName {
 		return nil, ErrHashAlgoMismatch
+	}
+
+	// Validate compression type compatibility
+	// Reading data with the wrong decompressor would fail or produce garbage.
+	if m.Compression != c.compression {
+		return nil, ErrCompressionMismatch
 	}
 
 	// Verify output hash to detect corruption
@@ -186,7 +195,10 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	}
 
 	// Report cache hit with entry size
-	objectDir := c.objectPath(keyHash)
+	objectDir, err := c.objectPath(keyHash)
+	if err != nil {
+		return nil, err
+	}
 	entrySize, _ := c.dirSize(objectDir)
 	c.metrics.hit(keyHash, entrySize)
 
@@ -234,7 +246,10 @@ func (c *Cache) Has(key Key) bool {
 	c.keyLocks.lockKey(keyHash)
 	defer c.keyLocks.unlockKey(keyHash)
 
-	manifestPath := c.manifestPath(keyHash)
+	manifestPath, err := c.manifestPath(keyHash)
+	if err != nil {
+		return false
+	}
 	exists, err := afero.Exists(c.fs, manifestPath)
 	return err == nil && exists
 }
@@ -252,7 +267,10 @@ func (c *Cache) Delete(key Key) error {
 	defer c.keyLocks.unlockKey(keyHash)
 
 	// Get entry size before deleting for metrics
-	objectDir := c.objectPath(keyHash)
+	objectDir, err := c.objectPath(keyHash)
+	if err != nil {
+		return err
+	}
 	entrySize, _ := c.dirSize(objectDir)
 
 	if err := c.deleteByKeyHash(keyHash); err != nil {
@@ -281,14 +299,16 @@ func (c *Cache) Clear() error {
 		entriesToEvict, _ = c.entriesUnlocked()
 	}
 
-	// Remove everything
-	if err := c.fs.RemoveAll(c.manifestDir()); err != nil {
-		c.metrics.error("clear", err)
-		return fmt.Errorf("failed to remove manifests: %w", err)
-	}
+	// Remove objects first, then manifests.
+	// Orphaned objects (objects without manifests) are recoverable via GC,
+	// but orphaned manifests (manifests without objects) cause corrupted reads.
 	if err := c.fs.RemoveAll(c.objectsDir()); err != nil {
 		c.metrics.error("clear", err)
 		return fmt.Errorf("failed to remove objects: %w", err)
+	}
+	if err := c.fs.RemoveAll(c.manifestDir()); err != nil {
+		c.metrics.error("clear", err)
+		return fmt.Errorf("failed to remove manifests: %w", err)
 	}
 
 	// Recreate directories
@@ -323,22 +343,27 @@ func (c *Cache) objectsDir() string {
 	return filepath.Join(c.root, "objects")
 }
 
+// ErrInvalidKeyHash is returned when a key hash is too short for sharding.
+var ErrInvalidKeyHash = fmt.Errorf("key hash shorter than %d characters", hashPrefixLen)
+
 // manifestPath returns the path to a manifest file for a given key hash.
-func (c *Cache) manifestPath(keyHash string) string {
+// Returns an error if the hash is too short for two-level sharding.
+func (c *Cache) manifestPath(keyHash string) (string, error) {
 	if len(keyHash) < hashPrefixLen {
-		panic(fmt.Sprintf("key hash too short: %s", keyHash))
+		return "", fmt.Errorf("%w: %q", ErrInvalidKeyHash, keyHash)
 	}
 	prefix := keyHash[:hashPrefixLen]
-	return filepath.Join(c.manifestDir(), prefix, keyHash+".json")
+	return filepath.Join(c.manifestDir(), prefix, keyHash+".json"), nil
 }
 
 // objectPath returns the path to the object directory for a given key hash.
-func (c *Cache) objectPath(keyHash string) string {
+// Returns an error if the hash is too short for two-level sharding.
+func (c *Cache) objectPath(keyHash string) (string, error) {
 	if len(keyHash) < hashPrefixLen {
-		panic(fmt.Sprintf("key hash too short: %s", keyHash))
+		return "", fmt.Errorf("%w: %q", ErrInvalidKeyHash, keyHash)
 	}
 	prefix := keyHash[:hashPrefixLen]
-	return filepath.Join(c.objectsDir(), prefix, keyHash)
+	return filepath.Join(c.objectsDir(), prefix, keyHash), nil
 }
 
 // newHash creates a new hash instance.
@@ -381,9 +406,13 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 		return nil // Enough space
 	}
 
-	// Sort by AccessedAt ascending (oldest/least recently accessed first)
+	// Sort by AccessedAt ascending (oldest/least recently accessed first).
+	// Use KeyHash as tiebreaker for deterministic eviction when timestamps are equal.
 	slices.SortFunc(entries, func(a, b Entry) int {
-		return cmp.Compare(a.AccessedAt.UnixNano(), b.AccessedAt.UnixNano())
+		if c := cmp.Compare(a.AccessedAt.UnixNano(), b.AccessedAt.UnixNano()); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.KeyHash, b.KeyHash)
 	})
 
 	// Evict until we have enough space.
@@ -411,14 +440,11 @@ func (c *Cache) entriesUnlocked() ([]Entry, error) {
 	var entries []Entry
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
-		objectDir := c.objectPath(keyHash)
-		size, _ := c.dirSize(objectDir)
-
 		entry := Entry{
 			KeyHash:    keyHash,
 			CreatedAt:  m.CreatedAt,
 			AccessedAt: m.AccessedAt,
-			Size:       size,
+			Size:       c.manifestEntrySize(m),
 			FileCount:  len(m.OutputFiles) + len(m.OutputData),
 		}
 		entries = append(entries, entry)

@@ -46,10 +46,8 @@ func (c *Cache) Stats() (Stats, error) {
 			newest = m.CreatedAt
 		}
 
-		// Calculate size
-		objectDir := c.objectPath(keyHash)
-		size, _ := c.dirSize(objectDir)
-		stats.TotalSize += size
+		// Calculate size from manifest file references to avoid O(N^2) directory walks.
+		stats.TotalSize += c.manifestEntrySize(m)
 
 		return nil
 	})
@@ -85,9 +83,7 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
 		if m.CreatedAt.Before(cutoff) {
-			objectDir := c.objectPath(keyHash)
-			size, _ := c.dirSize(objectDir)
-			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: size})
+			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
 		return nil
 	})
@@ -127,9 +123,7 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
 		if m.AccessedAt.Before(cutoff) {
-			objectDir := c.objectPath(keyHash)
-			size, _ := c.dirSize(objectDir)
-			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: size})
+			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
 		return nil
 	})
@@ -161,14 +155,11 @@ func (c *Cache) Entries() ([]Entry, error) {
 	var entries []Entry
 
 	err := c.walkManifests(func(keyHash string, m *manifest) error {
-		objectDir := c.objectPath(keyHash)
-		size, _ := c.dirSize(objectDir)
-
 		entry := Entry{
 			KeyHash:    keyHash,
 			CreatedAt:  m.CreatedAt,
 			AccessedAt: m.AccessedAt,
-			Size:       size,
+			Size:       c.manifestEntrySize(m),
 			FileCount:  len(m.OutputFiles) + len(m.OutputData),
 		}
 		entries = append(entries, entry)
@@ -206,13 +197,35 @@ func (c *Cache) walkManifests(fn func(keyHash string, m *manifest) error) error 
 		// Load manifest
 		m, err := c.loadManifest(keyHash)
 		if err != nil {
-			// Skip corrupted manifests but report via metrics
+			// Remove corrupted manifest and its orphaned objects to prevent
+			// re-encountering this error on every subsequent walk.
 			c.metrics.error("walkManifests", fmt.Errorf("corrupted manifest %s: %w", keyHash, err))
+			_ = c.fs.Remove(path)
+			if objectDir, oErr := c.objectPath(keyHash); oErr == nil {
+				_ = c.fs.RemoveAll(objectDir)
+			}
 			return nil
 		}
 
 		return fn(keyHash, m)
 	})
+}
+
+// manifestEntrySize computes the size of a cache entry by statting the files
+// referenced in the manifest. This avoids a full directory walk per entry.
+func (c *Cache) manifestEntrySize(m *manifest) int64 {
+	var size int64
+	for _, path := range m.OutputFiles {
+		if info, err := c.fs.Stat(path); err == nil {
+			size += info.Size()
+		}
+	}
+	for _, path := range m.OutputData {
+		if info, err := c.fs.Stat(path); err == nil {
+			size += info.Size()
+		}
+	}
+	return size
 }
 
 // dirSize calculates the total size of all files in a directory.
@@ -235,15 +248,21 @@ func (c *Cache) dirSize(dir string) (int64, error) {
 // removeByHash removes a cache entry by its key hash.
 func (c *Cache) removeByHash(keyHash string) error {
 	// Remove manifest
-	manifestPath := c.manifestPath(keyHash)
-	if exists, _ := afero.Exists(c.fs, manifestPath); exists {
-		if err := c.fs.Remove(manifestPath); err != nil {
+	mPath, err := c.manifestPath(keyHash)
+	if err != nil {
+		return err
+	}
+	if exists, _ := afero.Exists(c.fs, mPath); exists {
+		if err := c.fs.Remove(mPath); err != nil {
 			return fmt.Errorf("failed to remove manifest: %w", err)
 		}
 	}
 
 	// Remove object directory
-	objectDir := c.objectPath(keyHash)
+	objectDir, err := c.objectPath(keyHash)
+	if err != nil {
+		return err
+	}
 	if exists, _ := afero.Exists(c.fs, objectDir); exists {
 		if err := c.fs.RemoveAll(objectDir); err != nil {
 			return fmt.Errorf("failed to remove objects: %w", err)
@@ -273,7 +292,7 @@ func (c *Cache) GC() (int, int64, error) {
 
 	// Step 2: Walk the objects directory and find orphans
 	objectsDir := c.objectsDir()
-	var filesRemoved int
+	var dirsRemoved int
 	var bytesReclaimed int64
 
 	// Objects are stored as: objects/{first2chars}/{fullhash}/files
@@ -301,7 +320,7 @@ func (c *Cache) GC() (int, int64, error) {
 			// Orphan! Remove it
 			size, _ := c.dirSize(path)
 			if removeErr := c.fs.RemoveAll(path); removeErr == nil {
-				filesRemoved++
+				dirsRemoved++
 				bytesReclaimed += size
 			}
 			return filepath.SkipDir // Don't descend into removed directory
@@ -310,10 +329,10 @@ func (c *Cache) GC() (int, int64, error) {
 		return filepath.SkipDir // Don't descend into valid directories either
 	})
 	if err != nil {
-		return filesRemoved, bytesReclaimed, fmt.Errorf("failed to walk objects directory: %w", err)
+		return dirsRemoved, bytesReclaimed, fmt.Errorf("failed to walk objects directory: %w", err)
 	}
 
-	return filesRemoved, bytesReclaimed, nil
+	return dirsRemoved, bytesReclaimed, nil
 }
 
 // extractHashFromPath extracts the key hash from an object directory path.

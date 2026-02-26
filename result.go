@@ -150,7 +150,8 @@ func (r *Result) readCompressedFile(path string) ([]byte, error) {
 }
 
 // Data returns all byte data as a map of name -> bytes.
-// Data is lazy-loaded from disk.
+// Data is lazy-loaded from disk. Entries that fail to read are silently skipped.
+// Use DataErr for explicit error handling.
 func (r *Result) Data() map[string][]byte {
 	result := make(map[string][]byte, len(r.dataPaths))
 	for name := range r.dataPaths {
@@ -161,6 +162,23 @@ func (r *Result) Data() map[string][]byte {
 		}
 	}
 	return result
+}
+
+// DataErr returns all byte data as a map of name -> bytes, with explicit error reporting.
+// Unlike Data(), it returns an error if any entry fails to read or decompress.
+// Data is lazy-loaded from disk.
+func (r *Result) DataErr() (map[string][]byte, error) {
+	result := make(map[string][]byte, len(r.dataPaths))
+	for name := range r.dataPaths {
+		data, err := r.BytesErr(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load data %s: %w", name, err)
+		}
+		if data != nil {
+			result[name] = bytes.Clone(data)
+		}
+	}
+	return result, nil
 }
 
 // HasData returns true if data with the given name exists in the cache.
