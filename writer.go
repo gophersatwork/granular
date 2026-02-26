@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/afero"
 )
@@ -123,7 +122,7 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("WriteBuilder already committed")
 	}
 
-	startTime := time.Now()
+	startTime := wb.cache.now()
 
 	// Check for accumulated validation errors first (no lock needed)
 	if len(wb.errors) > 0 {
@@ -263,8 +262,8 @@ func (wb *WriteBuilder) Commit() error {
 	wb.data = nil
 	wb.metadata = nil
 
-	// Report successful put with duration
-	wb.cache.metrics.put(keyHash, requiredSpace, time.Since(startTime))
+	// Report successful put with duration (use nowFunc for deterministic time in tests)
+	wb.cache.metrics.put(keyHash, requiredSpace, wb.cache.now().Sub(startTime))
 
 	return nil
 }

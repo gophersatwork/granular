@@ -217,13 +217,14 @@ func TestWithNowFunc_IncrementalTime(t *testing.T) {
 	result1, _ := cache.Get(key1)
 	result2, _ := cache.Get(key2)
 
-	// The times are based on when Commit was called, which calls nowFunc twice (CreatedAt and AccessedAt)
-	// So we expect the difference to be based on the number of nowFunc calls between commits
+	// The times are based on when Commit was called, which calls nowFunc four times:
+	// startTime (metrics), CreatedAt, AccessedAt, and duration end (metrics).
+	// So we expect the difference to be based on the number of nowFunc calls between commits.
 	diff := result2.CreatedAt().Sub(result1.CreatedAt())
 
-	// Since each commit calls nowFunc twice, the difference should be 2 hours
-	if diff != 2*time.Hour {
-		t.Errorf("Time difference = %v, want 2h (nowFunc called %d times between commits)", diff, time2CallCount-time1CallCount)
+	// Since each commit calls nowFunc four times, the difference should be 4 hours
+	if diff != 4*time.Hour {
+		t.Errorf("Time difference = %v, want 4h (nowFunc called %d times between commits)", diff, time2CallCount-time1CallCount)
 	}
 }
 

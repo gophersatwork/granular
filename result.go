@@ -83,11 +83,17 @@ func (r *Result) CopyFile(name, dst string) error {
 		return fmt.Errorf("failed to create temp file %s: %w", tmpPath, err)
 	}
 
+	// Limit decompressed output to prevent decompression bombs (zstd/gzip bombs).
+	// Same maxDataSize used by readCompressedFile for Bytes().
+	// Allow exactly maxSize bytes; error if decompressed output exceeds it.
+	maxSize := r.cache.effectiveMaxDataSize()
+	limited := &limitedReader{r: reader, remaining: maxSize + 1}
+
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
-	_, copyErr := io.CopyBuffer(dstFile, reader, buffer)
+	_, copyErr := io.CopyBuffer(dstFile, limited, buffer)
 	closeErr := dstFile.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		_ = r.cache.fs.Remove(tmpPath)
@@ -142,6 +148,26 @@ func (r *Result) BytesErr(name string) ([]byte, error) {
 	r.dataCache[name] = data
 
 	return data, nil
+}
+
+// limitedReader wraps a reader and returns an error when the limit is exceeded.
+// Unlike io.LimitReader (which returns EOF), this returns a descriptive error
+// to distinguish a normal complete read from a decompression bomb.
+type limitedReader struct {
+	r         io.Reader
+	remaining int64
+}
+
+func (lr *limitedReader) Read(p []byte) (int, error) {
+	if lr.remaining <= 0 {
+		return 0, fmt.Errorf("decompressed output exceeds max size limit")
+	}
+	if int64(len(p)) > lr.remaining {
+		p = p[:lr.remaining]
+	}
+	n, err := lr.r.Read(p)
+	lr.remaining -= int64(n)
+	return n, err
 }
 
 // readCompressedFile reads a file and decompresses it if needed.

@@ -52,24 +52,28 @@ func (c *Cache) Export(w io.Writer) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// Require Lstater to detect symlinks. Without it, afero.Walk follows symlinks
+	// via Stat, which could leak files outside the cache directory into the archive.
+	lstater, ok := c.fs.(afero.Lstater)
+	if !ok {
+		return fmt.Errorf("filesystem does not support Lstat; export requires symlink detection to prevent data leakage")
+	}
+
 	tw := tar.NewWriter(w)
-	defer tw.Close()
 
 	// Walk the cache root and add all files.
 	// Uses Lstat to avoid following symlinks that could leak files outside the cache.
 	baseDir := c.root
-	return afero.Walk(c.fs, baseDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := afero.Walk(c.fs, baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip symlinks to prevent leaking files outside the cache.
 		// afero.Walk uses Stat which follows symlinks, so we re-check with Lstat.
-		if lstater, ok := c.fs.(afero.Lstater); ok {
-			linfo, _, lErr := lstater.LstatIfPossible(path)
-			if lErr == nil && linfo.Mode()&os.ModeSymlink != 0 {
-				return nil
-			}
+		linfo, _, lErr := lstater.LstatIfPossible(path)
+		if lErr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+			return nil
 		}
 
 		// Get relative path for archive
@@ -105,6 +109,17 @@ func (c *Cache) Export(w io.Writer) error {
 
 		return nil
 	})
+	if walkErr != nil {
+		return walkErr
+	}
+
+	// Close tar writer explicitly to flush the footer and catch write errors.
+	// A deferred Close() would discard this error, producing a silently corrupt archive.
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to finalize tar archive: %w", err)
+	}
+
+	return nil
 }
 
 // Import reads a tar archive and populates the cache.

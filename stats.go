@@ -284,26 +284,37 @@ func (c *Cache) dirSize(dir string) (int64, error) {
 }
 
 // removeByHash removes a cache entry by its key hash.
+// Remove objects first, then manifest — same ordering as Clear().
+// Orphaned objects (objects without manifests) are recoverable via GC,
+// but orphaned manifests (manifests without objects) cause corrupted reads.
 func (c *Cache) removeByHash(keyHash string) error {
-	// Remove manifest
-	mPath, err := c.manifestPath(keyHash)
-	if err != nil {
-		return err
-	}
-	if exists, _ := afero.Exists(c.fs, mPath); exists {
-		if err := c.fs.Remove(mPath); err != nil {
-			return fmt.Errorf("failed to remove manifest: %w", err)
-		}
-	}
-
-	// Remove object directory
+	// Remove object directory first
 	objectDir, err := c.objectPath(keyHash)
 	if err != nil {
 		return err
 	}
-	if exists, _ := afero.Exists(c.fs, objectDir); exists {
+	exists, err := afero.Exists(c.fs, objectDir)
+	if err != nil {
+		return fmt.Errorf("failed to check objects directory: %w", err)
+	}
+	if exists {
 		if err := c.fs.RemoveAll(objectDir); err != nil {
 			return fmt.Errorf("failed to remove objects: %w", err)
+		}
+	}
+
+	// Remove manifest second
+	mPath, err := c.manifestPath(keyHash)
+	if err != nil {
+		return err
+	}
+	exists, err = afero.Exists(c.fs, mPath)
+	if err != nil {
+		return fmt.Errorf("failed to check manifest: %w", err)
+	}
+	if exists {
+		if err := c.fs.Remove(mPath); err != nil {
+			return fmt.Errorf("failed to remove manifest: %w", err)
 		}
 	}
 

@@ -27,7 +27,7 @@ const defaultMaxDataSize = 1 << 30
 // It provides content-addressed storage for files and data.
 //
 // Lock hierarchy (acquire in this order to prevent deadlocks):
-//  1. c.mu        — global RWMutex for bulk operations (Clear, Prune, GC, eviction)
+//  1. c.mu        — global RWMutex (RLock for Get, Has, Delete, Put-write; Lock for Clear, Prune, GC, Put-eviction, Import)
 //  2. c.keyLocks  — per-key sharded Mutex for individual entry operations (Get, Put, Delete, Has)
 //
 // Never acquire c.mu while holding a keyLock.
@@ -120,6 +120,11 @@ func (c *Cache) Get(key Key) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute key hash: %w", err)
 	}
+
+	// Hold global read lock to prevent Clear/GC/Import from removing
+	// directories while we read. Multiple Gets proceed concurrently (RLock).
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	// Use per-key lock for concurrent access to different keys
 	c.keyLocks.lockKey(keyHash)
@@ -252,6 +257,11 @@ func (c *Cache) Has(key Key) bool {
 		return false
 	}
 
+	// Hold global read lock to prevent Clear/GC/Import from removing
+	// directories while we check. Multiple Has calls proceed concurrently (RLock).
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	c.keyLocks.lockKey(keyHash)
 	defer c.keyLocks.unlockKey(keyHash)
 
@@ -265,11 +275,21 @@ func (c *Cache) Has(key Key) bool {
 
 // Delete removes a cache entry by key.
 func (c *Cache) Delete(key Key) error {
+	// Check for key validation errors first (no lock needed)
+	if len(key.errors) > 0 {
+		return newValidationError(key.errors)
+	}
+
 	// Compute key hash BEFORE locking (pure computation, no lock needed)
 	keyHash, err := key.computeHash()
 	if err != nil {
 		return fmt.Errorf("failed to compute key hash: %w", err)
 	}
+
+	// Hold global read lock to prevent Clear/GC/Import from removing
+	// directories while we delete. Multiple Deletes proceed concurrently (RLock).
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	// Use per-key lock for concurrent access to different keys
 	c.keyLocks.lockKey(keyHash)
@@ -423,8 +443,10 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 
 	// Include pending (in-flight) Commit sizes to prevent concurrent
 	// Commits from all passing eviction and exceeding maxSize.
+	// Note: pending already includes the caller's own requiredSpace
+	// (added in Commit before acquiring c.mu), so no separate addition needed.
 	pending := c.pendingSize.Load()
-	if currentSize+pending+requiredSpace <= c.maxSize {
+	if currentSize+pending <= c.maxSize {
 		return nil // Enough space
 	}
 
@@ -439,8 +461,9 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 
 	// Evict until we have enough space.
 	// Acquire per-key lock for each entry to prevent races with concurrent Get().
+	// Re-read pending each iteration to account for concurrent commits completing.
 	for _, entry := range entries {
-		if currentSize+requiredSpace <= c.maxSize {
+		if currentSize+c.pendingSize.Load() <= c.maxSize {
 			break
 		}
 		c.keyLocks.lockKey(entry.KeyHash)
