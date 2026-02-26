@@ -57,7 +57,7 @@ func (c *CLI) cmdCreate(args []string) error {
 		Role:      role,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	if err := user.Validate(); err != nil {

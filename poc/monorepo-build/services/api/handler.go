@@ -14,7 +14,7 @@ import (
 // Response represents a standard API response
 type Response struct {
 	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
+	Data    any `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
 	Meta    *Meta       `json:"meta,omitempty"`
 }
@@ -35,7 +35,7 @@ var (
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	response := Response{
 		Success: true,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"status":  "healthy",
 			"uptime":  time.Now().Format(time.RFC3339),
 			"version": "1.0.0",
@@ -82,7 +82,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Role:      req.Role,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	if err := user.Validate(); err != nil {
@@ -109,7 +109,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 	response := Response{
 		Success: true,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"users": users,
 			"count": len(users),
 		},
@@ -124,7 +124,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	count := requestCounter
 	counterMutex.Unlock()
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"total_users":    len(s.users),
 		"total_requests": count,
 		"timestamp":      time.Now().Format(time.RFC3339),
@@ -154,7 +154,7 @@ func buildMeta() *Meta {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)

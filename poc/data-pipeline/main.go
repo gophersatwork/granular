@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -230,7 +232,7 @@ func downloadData(cache *granular.Cache, forceInvalidate bool) (string, error) {
 	recordCount := 0
 
 	for day := 1; day <= 31; day++ {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			date := fmt.Sprintf("2024-01-%02d", day)
 			product := products[i%len(products)]
 			quantity := (i+day)%10 + 1
@@ -515,14 +517,10 @@ func analyzeData(cache *granular.Cache, inputPath string, forceInvalidate bool) 
 		topProducts = append(topProducts, *ps)
 	}
 
-	// Simple sort by total sales (descending)
-	for i := 0; i < len(topProducts); i++ {
-		for j := i + 1; j < len(topProducts); j++ {
-			if topProducts[j].TotalSales > topProducts[i].TotalSales {
-				topProducts[i], topProducts[j] = topProducts[j], topProducts[i]
-			}
-		}
-	}
+	// Sort by total sales (descending)
+	slices.SortFunc(topProducts, func(a, b ProductSummary) int {
+		return cmp.Compare(b.TotalSales, a.TotalSales)
+	})
 
 	// Take top 5
 	if len(topProducts) > 5 {

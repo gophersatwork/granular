@@ -37,7 +37,7 @@ type WorkerPool struct {
 type Job struct {
 	ID        string
 	Type      string
-	Data      interface{}
+	Data      any
 	Priority  int
 	CreatedAt time.Time
 }
@@ -81,29 +81,23 @@ func NewWorkerPool(numWorkers int) *WorkerPool {
 func (wp *WorkerPool) Start() {
 	log.Printf("Starting worker pool with %d workers", wp.numWorkers)
 
-	for i := 0; i < wp.numWorkers; i++ {
+	for i := range wp.numWorkers {
 		worker := NewWorker(i, wp.jobs, wp.results, wp.ctx)
 		wp.workers = append(wp.workers, worker)
-		wp.wg.Add(1)
-		go func(w *Worker) {
-			defer wp.wg.Done()
-			w.Start()
-		}(worker)
+		wp.wg.Go(func() {
+			worker.Start()
+		})
 	}
 
 	// Start result collector
-	wp.wg.Add(1)
-	go func() {
-		defer wp.wg.Done()
+	wp.wg.Go(func() {
 		wp.collectResults()
-	}()
+	})
 
 	// Start health monitor
-	wp.wg.Add(1)
-	go func() {
-		defer wp.wg.Done()
+	wp.wg.Go(func() {
 		wp.healthMonitor()
-	}()
+	})
 }
 
 // Submit adds a job to the queue
@@ -192,7 +186,7 @@ func main() {
 
 	// Simulate job submission
 	go func() {
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			user := &models.User{
 				ID:        utils.GenerateID("user"),
 				Email:     fmt.Sprintf("user%d@example.com", i),

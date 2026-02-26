@@ -103,7 +103,7 @@ func (w *Worker) processUser(job Job) error {
 	user.UpdateMetadata("checksum", utils.ComputeHash(user.Email))
 
 	// Simulate additional work
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = utils.GenerateID("temp")
 	}
 
@@ -113,7 +113,7 @@ func (w *Worker) processUser(job Job) error {
 
 // sendEmail handles email sending jobs
 func (w *Worker) sendEmail(job Job) error {
-	data, ok := job.Data.(map[string]interface{})
+	data, ok := job.Data.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid email data")
 	}
@@ -141,8 +141,8 @@ func (w *Worker) generateReport(job Job) error {
 	time.Sleep(time.Duration(rand.Intn(2000)) * time.Millisecond)
 
 	// Generate dummy data
-	data := make(map[string]interface{})
-	for i := 0; i < 50; i++ {
+	data := make(map[string]any)
+	for i := range 50 {
 		key := fmt.Sprintf("metric_%d", i)
 		data[key] = rand.Float64() * 100
 	}

@@ -5,14 +5,14 @@ import "fmt"
 // TODO: Add documentation
 type Helper struct {
 	Name string
-	Data map[string]interface{}
+	Data map[string]any
 }
 
 func NewHelper(name string) *Helper {
 	fmt.Println("Creating new helper:", name)
 	return &Helper{
 		Name: name,
-		Data: make(map[string]interface{}),
+		Data: make(map[string]any),
 	}
 }
 

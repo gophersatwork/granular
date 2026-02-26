@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 )
@@ -20,7 +21,7 @@ func GenerateID(prefix string) string {
 }
 
 // FormatJSON converts any value to pretty JSON
-func FormatJSON(v interface{}) (string, error) {
+func FormatJSON(v any) (string, error) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return "", err
@@ -29,20 +30,15 @@ func FormatJSON(v interface{}) (string, error) {
 }
 
 // ParseJSON parses JSON string into a map
-func ParseJSON(jsonStr string) (map[string]interface{}, error) {
-	var result map[string]interface{}
+func ParseJSON(jsonStr string) (map[string]any, error) {
+	var result map[string]any
 	err := json.Unmarshal([]byte(jsonStr), &result)
 	return result, err
 }
 
 // Contains checks if a slice contains a value
 func Contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 // Filter filters a slice based on a predicate
@@ -83,7 +79,7 @@ func RetryWithBackoff(fn func() error, maxRetries int, initialDelay time.Duratio
 	var err error
 	delay := initialDelay
 
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		err = fn()
 		if err == nil {
 			return nil

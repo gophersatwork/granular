@@ -13,7 +13,7 @@ type User struct {
 	Role      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	Metadata  map[string]interface{}
+	Metadata  map[string]any
 }
 
 // Validate checks if the user data is valid
@@ -36,16 +36,16 @@ func (u *User) IsAdmin() bool {
 }
 
 // UpdateMetadata updates a metadata field
-func (u *User) UpdateMetadata(key string, value interface{}) {
+func (u *User) UpdateMetadata(key string, value any) {
 	if u.Metadata == nil {
-		u.Metadata = make(map[string]interface{})
+		u.Metadata = make(map[string]any)
 	}
 	u.Metadata[key] = value
 	u.UpdatedAt = time.Now()
 }
 
 // GetMetadata retrieves a metadata field
-func (u *User) GetMetadata(key string) (interface{}, bool) {
+func (u *User) GetMetadata(key string) (any, bool) {
 	if u.Metadata == nil {
 		return nil, false
 	}
@@ -55,7 +55,7 @@ func (u *User) GetMetadata(key string) (interface{}, bool) {
 
 // Clone creates a deep copy of the user
 func (u *User) Clone() *User {
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 	for k, v := range u.Metadata {
 		metadata[k] = v
 	}

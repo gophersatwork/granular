@@ -113,7 +113,7 @@ func main() {
 			Role:      "admin",
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
-			Metadata:  map[string]interface{}{"department": "IT"},
+			Metadata:  map[string]any{"department": "IT"},
 		},
 		{
 			ID:        utils.GenerateID("user"),
@@ -122,7 +122,7 @@ func main() {
 			Role:      "member",
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
-			Metadata:  map[string]interface{}{"department": "Sales"},
+			Metadata:  map[string]any{"department": "Sales"},
 		},
 	}
 
