@@ -20,9 +20,9 @@ var (
 	// since the key hash would be different.
 	ErrHashAlgoMismatch = errors.New("hash algorithm mismatch")
 
-	// ErrCompressionMismatch is returned when a cache entry was created with a different
-	// compression type than the one currently configured. The entry cannot be read
-	// because the decompressor would fail or produce garbage.
+	// ErrCompressionMismatch indicates a cache entry was created with a different
+	// compression type than the one currently configured. Get() auto-evicts such
+	// entries and returns ErrCacheMiss so callers can recompute transparently.
 	ErrCompressionMismatch = errors.New("compression type mismatch")
 )
 

@@ -414,6 +414,12 @@ func expandGlob(pattern string, fs afero.Fs) ([]string, error) {
 			return err
 		}
 		if info.IsDir() {
+			// For non-recursive patterns, skip subdirectories to match standard
+			// glob semantics: src/*.go matches only files directly in src/, not
+			// files in src/pkg/ or deeper.
+			if !hasRecursive && path != baseDir {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 

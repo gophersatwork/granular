@@ -163,10 +163,14 @@ func (c *Cache) Get(key Key) (*Result, error) {
 		return nil, ErrHashAlgoMismatch
 	}
 
-	// Validate compression type compatibility
+	// Validate compression type compatibility.
 	// Reading data with the wrong decompressor would fail or produce garbage.
+	// Treat as a cache miss and auto-evict so callers checking for ErrCacheMiss
+	// can recompute the entry with the current compression setting.
 	if m.Compression != c.compression {
-		return nil, ErrCompressionMismatch
+		_ = c.deleteByKeyHash(keyHash)
+		c.metrics.miss(keyHash)
+		return nil, ErrCacheMiss
 	}
 
 	// Verify output hash to detect corruption

@@ -157,27 +157,42 @@ func (c *Cache) Import(r io.Reader) error {
 				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
 			}
 		case tar.TypeReg:
+			// Reject oversized entries to prevent tar bombs.
+			maxFileSize := c.effectiveMaxDataSize()
+			if header.Size > maxFileSize {
+				return fmt.Errorf("archive entry %s size %d exceeds max allowed size %d", header.Name, header.Size, maxFileSize)
+			}
+
 			// Ensure parent directory exists
 			if err := c.fs.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
 
-			// Use atomic write (tmp + rename) to avoid partial files on crash
+			// Use atomic write (tmp + rename) to avoid partial files on crash.
+			// Limit copy to declared header size to prevent oversized streams.
 			tmpPath := targetPath + ".tmp." + randomSuffix()
 			file, err := c.fs.Create(tmpPath)
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
 			}
-			if _, err := io.Copy(file, tr); err != nil {
+			if _, err := io.CopyN(file, tr, header.Size); err != nil {
 				file.Close()
 				_ = c.fs.Remove(tmpPath)
 				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
 			}
-			file.Close()
+			if err := file.Close(); err != nil {
+				_ = c.fs.Remove(tmpPath)
+				return fmt.Errorf("failed to close file %s: %w", targetPath, err)
+			}
 			if err := c.fs.Rename(tmpPath, targetPath); err != nil {
 				_ = c.fs.Remove(tmpPath)
 				return fmt.Errorf("failed to rename temp file %s: %w", targetPath, err)
 			}
+		case tar.TypeXGlobalHeader, tar.TypeXHeader:
+			// PAX extended headers — metadata already applied by Go's tar reader, skip.
+			continue
+		default:
+			return fmt.Errorf("unsupported tar entry type %d for %s", header.Typeflag, header.Name)
 		}
 	}
 

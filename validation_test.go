@@ -586,8 +586,39 @@ func TestWriteBuilder_DoubleCommit(t *testing.T) {
 	if err == nil {
 		t.Fatal("second Commit should return error")
 	}
-	if !strings.Contains(err.Error(), "already committed") {
-		t.Fatalf("expected 'already committed' error, got: %v", err)
+	if !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("expected 'already used' error, got: %v", err)
+	}
+}
+
+// TestWriteBuilder_RetryAfterFailure tests that a failed Commit() prevents retry.
+// A failed Commit may have performed side effects (eviction, partial writes) that
+// make a retry unsafe. The attempted flag ensures one-shot semantics.
+func TestWriteBuilder_RetryAfterFailure(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	key := cache.Key().String("test", "retry").Build()
+
+	// Reference a source file that doesn't exist — Commit will fail during file copy
+	wb := cache.Put(key).File("missing", "/nonexistent/file.txt")
+
+	// First Commit fails (validation error: file doesn't exist)
+	if err := wb.Commit(); err == nil {
+		t.Fatal("Commit should fail for missing source file")
+	}
+
+	// Retry should be rejected even though the first attempt failed
+	err = wb.Commit()
+	if err == nil {
+		t.Fatal("retry Commit should return error")
+	}
+	if !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("expected 'already used' error, got: %v", err)
 	}
 }
 

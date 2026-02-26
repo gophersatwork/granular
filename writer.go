@@ -36,6 +36,7 @@ type WriteBuilder struct {
 	metadata         map[string]string // metadata key-value pairs
 	errors           []error           // Accumulated validation errors (from key + write operations)
 	accumulateErrors bool              // If true, accumulate all errors; if false, fail-fast
+	attempted        bool              // True once Commit() starts; prevents retry after failure
 	committed        bool              // True after Commit() succeeds; prevents reuse
 }
 
@@ -118,9 +119,10 @@ func (wb *WriteBuilder) Meta(key, value string) *WriteBuilder {
 // Returns a ValidationError if there are accumulated errors from key building or write operations.
 // Returns an error if the storage operation fails.
 func (wb *WriteBuilder) Commit() error {
-	if wb.committed {
-		return fmt.Errorf("WriteBuilder already committed")
+	if wb.committed || wb.attempted {
+		return fmt.Errorf("WriteBuilder already used: Commit can only be called once")
 	}
+	wb.attempted = true
 
 	startTime := wb.cache.now()
 

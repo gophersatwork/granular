@@ -55,7 +55,7 @@ func TestExpandGlob_SimplePatterns(t *testing.T) {
 		{
 			name:     "single wildcard extension",
 			pattern:  "*.md",
-			expected: []string{"README.md", "docs/README.md", "src/pkg/core/README.md"},
+			expected: []string{"README.md"},
 		},
 		{
 			name:     "directory with wildcard",
