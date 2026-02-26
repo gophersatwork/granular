@@ -1192,6 +1192,44 @@ func TestDataIterErr_EarlyBreak(t *testing.T) {
 	}
 }
 
+// TestStatsSkipsCorruptedManifest verifies that Stats() under RLock does not
+// delete a corrupted manifest — the entry is just skipped.
+func TestStatsSkipsCorruptedManifest(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-stats-corrupted-test")
+
+	// Create a valid entry
+	testFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, testFile, []byte("data"))
+
+	key := cache.Key().File(testFile).String("v", "1").Build()
+	outFile := filepath.Join(tempDir, "out.txt")
+	createTestFile(t, memFs, outFile, []byte("output"))
+
+	err := cache.Put(key).File("out", outFile).Commit()
+	assertNoError(t, err, "Put valid entry")
+
+	// Write a corrupted manifest directly
+	corruptedHash := "ff00112233445566"
+	mDir := filepath.Join(tempDir, "manifests", corruptedHash[:2])
+	createTestDir(t, memFs, mDir)
+	corruptedPath := filepath.Join(mDir, corruptedHash+".json")
+	createTestFile(t, memFs, corruptedPath, []byte("NOT VALID JSON"))
+
+	// Stats should succeed, skipping the corrupted entry
+	stats, err := cache.Stats()
+	assertNoError(t, err, "Stats with corrupted manifest")
+	if stats.Entries != 1 {
+		t.Fatalf("Expected 1 valid entry in Stats, got %d", stats.Entries)
+	}
+
+	// The corrupted manifest file should still exist (not deleted under RLock)
+	exists, err := afero.Exists(memFs, corruptedPath)
+	assertNoError(t, err, "check corrupted manifest after Stats")
+	if !exists {
+		t.Fatal("Expected corrupted manifest to still exist after Stats()")
+	}
+}
+
 // TestCopyFileAtomicNoPartialOnFailure verifies that CopyFile doesn't leave
 // a partial destination file when the source is missing/unreadable.
 func TestCopyFileAtomicNoPartialOnFailure(t *testing.T) {

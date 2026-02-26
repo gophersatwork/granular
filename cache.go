@@ -300,7 +300,7 @@ func (c *Cache) Clear() error {
 	var entriesToEvict []Entry
 	if c.metrics != nil && c.metrics.OnEvict != nil {
 		var walkErr error
-		entriesToEvict = slices.Collect(c.entriesUnlocked(&walkErr))
+		entriesToEvict = slices.Collect(c.entriesUnlocked(&walkErr, nil))
 	}
 
 	// Remove objects first, then manifests.
@@ -395,10 +395,13 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 
 	// Get all entries with their sizes
 	var walkErr error
-	entries := slices.Collect(c.entriesUnlocked(&walkErr))
+	var corruptedKeys []string
+	entries := slices.Collect(c.entriesUnlocked(&walkErr, &corruptedKeys))
 	if walkErr != nil {
 		return fmt.Errorf("failed to get cache entries for eviction: %w", walkErr)
 	}
+
+	c.cleanupCorrupted(corruptedKeys)
 
 	// Calculate current total size
 	var currentSize int64
@@ -443,9 +446,10 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 
 // entriesUnlocked returns an iterator over all cache entries without acquiring locks.
 // Walk errors are captured in walkErr. Caller must hold at least a read lock on c.mu.
-func (c *Cache) entriesUnlocked(walkErr *error) iter.Seq[Entry] {
+// Corrupted keyHashes are appended to corrupted if non-nil (see manifests()).
+func (c *Cache) entriesUnlocked(walkErr *error, corrupted *[]string) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
-		for keyHash, m := range c.manifests(walkErr) {
+		for keyHash, m := range c.manifests(walkErr, corrupted) {
 			entry := Entry{
 				KeyHash:    keyHash,
 				CreatedAt:  m.CreatedAt,

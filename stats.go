@@ -40,7 +40,7 @@ func (c *Cache) Stats() (Stats, error) {
 	var oldest, newest time.Time
 
 	var walkErr error
-	for _, m := range c.manifests(&walkErr) {
+	for _, m := range c.manifests(&walkErr, nil) {
 		stats.Entries++
 
 		// Track oldest and newest
@@ -85,7 +85,8 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 	var toRemove []entryToRemove
 
 	var walkErr error
-	for keyHash, m := range c.manifests(&walkErr) {
+	var corruptedKeys []string
+	for keyHash, m := range c.manifests(&walkErr, &corruptedKeys) {
 		if m.CreatedAt.Before(cutoff) {
 			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
@@ -93,6 +94,8 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 	if walkErr != nil {
 		return 0, walkErr
 	}
+
+	c.cleanupCorrupted(corruptedKeys)
 
 	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
 	for _, entry := range toRemove {
@@ -125,7 +128,8 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	var toRemove []entryToRemove
 
 	var walkErr error
-	for keyHash, m := range c.manifests(&walkErr) {
+	var corruptedKeys []string
+	for keyHash, m := range c.manifests(&walkErr, &corruptedKeys) {
 		if m.AccessedAt.Before(cutoff) {
 			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
@@ -133,6 +137,8 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	if walkErr != nil {
 		return 0, walkErr
 	}
+
+	c.cleanupCorrupted(corruptedKeys)
 
 	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
 	for _, entry := range toRemove {
@@ -155,7 +161,7 @@ func (c *Cache) Entries() ([]Entry, error) {
 	defer c.mu.RUnlock()
 
 	var walkErr error
-	entries := slices.Collect(c.entriesUnlocked(&walkErr))
+	entries := slices.Collect(c.entriesUnlocked(&walkErr, nil))
 	if walkErr != nil {
 		return nil, walkErr
 	}
@@ -172,7 +178,7 @@ func (c *Cache) EntriesIter() iter.Seq[Entry] {
 		defer c.mu.RUnlock()
 
 		var walkErr error
-		for entry := range c.entriesUnlocked(&walkErr) {
+		for entry := range c.entriesUnlocked(&walkErr, nil) {
 			if !yield(entry) {
 				return
 			}
@@ -185,8 +191,11 @@ func (c *Cache) EntriesIter() iter.Seq[Entry] {
 var errStopWalk = errors.New("stop walk")
 
 // manifests returns an iterator over all manifest files in the cache.
-// Walk errors are captured in walkErr. Corrupted manifests are cleaned up and skipped.
-func (c *Cache) manifests(walkErr *error) iter.Seq2[string, *manifest] {
+// Walk errors are captured in walkErr. Corrupted manifest keyHashes are
+// appended to corrupted (if non-nil) and skipped. Callers holding a write
+// lock should pass a non-nil slice and clean up corrupted entries after
+// iteration. Callers holding only a read lock should pass nil.
+func (c *Cache) manifests(walkErr *error, corrupted *[]string) iter.Seq2[string, *manifest] {
 	return func(yield func(string, *manifest) bool) {
 		manifestDir := c.manifestDir()
 
@@ -211,12 +220,9 @@ func (c *Cache) manifests(walkErr *error) iter.Seq2[string, *manifest] {
 			// Load manifest
 			m, err := c.loadManifest(keyHash)
 			if err != nil {
-				// Remove corrupted manifest and its orphaned objects to prevent
-				// re-encountering this error on every subsequent walk.
 				c.metrics.error("manifests", fmt.Errorf("corrupted manifest %s: %w", keyHash, err))
-				_ = c.fs.Remove(path)
-				if objectDir, oErr := c.objectPath(keyHash); oErr == nil {
-					_ = c.fs.RemoveAll(objectDir)
+				if corrupted != nil {
+					*corrupted = append(*corrupted, keyHash)
 				}
 				return nil
 			}
@@ -230,6 +236,14 @@ func (c *Cache) manifests(walkErr *error) iter.Seq2[string, *manifest] {
 		if err != nil && !errors.Is(err, errStopWalk) {
 			*walkErr = err
 		}
+	}
+}
+
+// cleanupCorrupted removes corrupted manifests and their objects.
+// Caller must hold the global write lock (c.mu).
+func (c *Cache) cleanupCorrupted(keyHashes []string) {
+	for _, keyHash := range keyHashes {
+		_ = c.removeByHash(keyHash)
 	}
 }
 
@@ -305,12 +319,15 @@ func (c *Cache) GC() (int, int64, error) {
 	// Step 1: Collect all valid object directory hashes from manifests
 	validHashes := make(map[string]bool)
 	var walkErr error
-	for keyHash := range c.manifests(&walkErr) {
+	var corruptedKeys []string
+	for keyHash := range c.manifests(&walkErr, &corruptedKeys) {
 		validHashes[keyHash] = true
 	}
 	if walkErr != nil {
 		return 0, 0, fmt.Errorf("failed to walk manifests: %w", walkErr)
 	}
+
+	c.cleanupCorrupted(corruptedKeys)
 
 	// Step 2: Walk the objects directory and find orphans
 	objectsDir := c.objectsDir()
