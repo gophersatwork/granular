@@ -137,6 +137,14 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("failed to create object directory: %w", err)
 	}
 
+	// Clean up objectDir on any error after this point.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = wb.cache.fs.RemoveAll(objectDir)
+		}
+	}()
+
 	// Copy all files to cache.
 	// Uses "file.<name>.<ext>" as the destination to avoid basename collisions
 	// when different source paths share the same filename.
@@ -209,6 +217,8 @@ func (wb *WriteBuilder) Commit() error {
 	if err := wb.cache.saveManifest(manifest); err != nil {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
+
+	committed = true
 
 	// Report successful put with duration
 	wb.cache.metrics.put(keyHash, requiredSpace, time.Since(startTime))

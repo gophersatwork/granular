@@ -1191,3 +1191,40 @@ func TestDataIterErr_EarlyBreak(t *testing.T) {
 		t.Fatalf("Expected 1 iteration before break, got %d", count)
 	}
 }
+
+// TestCommitRollbackOnPartialFailure verifies that a failed Commit cleans up
+// the object directory instead of leaving orphaned files on disk.
+func TestCommitRollbackOnPartialFailure(t *testing.T) {
+	memFs := afero.NewMemMapFs()
+	cache, err := Open("/rollback-test", WithFs(memFs))
+	assertNoError(t, err, "Open cache")
+
+	// Create a source file for Put
+	createTestFile(t, memFs, "/rollback-test/src.txt", []byte("source"))
+
+	key := cache.Key().String("k", "v").Build()
+
+	// Compute the key hash to find the object directory later
+	keyHash, err := key.computeHash()
+	assertNoError(t, err, "computeHash")
+
+	objectDir, err := cache.objectPath(keyHash)
+	assertNoError(t, err, "objectPath")
+
+	// Put a file whose source path doesn't exist,
+	// causing a copy failure mid-Commit (after objectDir is created).
+	wb := cache.Put(key).File("out", "/rollback-test/missing.txt")
+
+	// The file doesn't exist, so Commit should fail
+	err = wb.Commit()
+	if err == nil {
+		t.Fatal("Expected Commit to fail for missing source file")
+	}
+
+	// The object directory should NOT exist (rollback cleaned it up)
+	exists, err := afero.Exists(memFs, objectDir)
+	assertNoError(t, err, "check objectDir after failed Commit")
+	if exists {
+		t.Fatal("Expected object directory to be cleaned up after failed Commit")
+	}
+}
