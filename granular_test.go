@@ -1192,6 +1192,47 @@ func TestDataIterErr_EarlyBreak(t *testing.T) {
 	}
 }
 
+// TestCopyFileAtomicNoPartialOnFailure verifies that CopyFile doesn't leave
+// a partial destination file when the source is missing/unreadable.
+func TestCopyFileAtomicNoPartialOnFailure(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-copyfile-atomic-test")
+
+	// Create and cache a file
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("input"))
+
+	key := cache.Key().File(inputFile).Build()
+
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("cached output"))
+
+	err := cache.Put(key).File("myfile", outputFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Get the result
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	// Delete the cached file from disk to simulate a broken cache entry
+	cachedPath := result.File("myfile")
+	err = memFs.Remove(cachedPath)
+	assertNoError(t, err, "remove cached file")
+
+	// Attempt to CopyFile — should fail because source is gone
+	destPath := filepath.Join(tempDir, "restored.txt")
+	err = result.CopyFile("myfile", destPath)
+	if err == nil {
+		t.Fatal("Expected CopyFile to fail when source is missing")
+	}
+
+	// Destination file should NOT exist (no partial file left behind)
+	exists, err := afero.Exists(memFs, destPath)
+	assertNoError(t, err, "check dest after failed CopyFile")
+	if exists {
+		t.Fatal("Expected no destination file after failed CopyFile")
+	}
+}
+
 // TestCommitRollbackOnPartialFailure verifies that a failed Commit cleans up
 // the object directory instead of leaving orphaned files on disk.
 func TestCommitRollbackOnPartialFailure(t *testing.T) {

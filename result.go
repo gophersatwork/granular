@@ -2,6 +2,7 @@ package granular
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -73,19 +74,27 @@ func (r *Result) CopyFile(name, dst string) error {
 	}
 	defer func() { _ = reader.Close() }()
 
-	dstFile, err := r.cache.fs.Create(dst)
+	// Write to temp file first, then atomic rename to prevent partial files on error
+	tmpPath := dst + ".tmp." + randomSuffix()
+	dstFile, err := r.cache.fs.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
+		return fmt.Errorf("failed to create temp file %s: %w", tmpPath, err)
 	}
-	defer func() { _ = dstFile.Close() }()
 
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
-	_, err = io.CopyBuffer(dstFile, reader, buffer)
-	if err != nil {
+	_, copyErr := io.CopyBuffer(dstFile, reader, buffer)
+	closeErr := dstFile.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		_ = r.cache.fs.Remove(tmpPath)
 		return fmt.Errorf("failed to copy file: %w", err)
+	}
+
+	if err := r.cache.fs.Rename(tmpPath, dst); err != nil {
+		_ = r.cache.fs.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
 	return nil
