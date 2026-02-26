@@ -140,11 +140,12 @@ func (c *Cache) Get(key Key) (*Result, error) {
 		return nil, ErrCacheMiss
 	}
 
-	// Load manifest
+	// Load manifest — treat parse failures as corruption and auto-clean
 	m, err := c.loadManifest(keyHash)
 	if err != nil {
-		c.metrics.error("get", err)
-		return nil, fmt.Errorf("failed to load manifest: %w", err)
+		_ = c.deleteByKeyHash(keyHash)
+		c.metrics.error("get", ErrCacheCorrupted)
+		return nil, ErrCacheCorrupted
 	}
 
 	// Validate hash algorithm compatibility

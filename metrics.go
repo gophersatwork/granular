@@ -21,6 +21,11 @@ type MetricsHooks struct {
 
 	// OnError is called when an operation fails.
 	OnError func(op string, err error)
+
+	// OnPanic is called when a metrics hook panics.
+	// Receives the hook name (e.g. "OnHit") and the recovered panic value.
+	// If nil, panics are silently recovered (default behavior).
+	OnPanic func(hook string, value any)
 }
 
 // EvictReason indicates why an entry was evicted.
@@ -35,38 +40,47 @@ const (
 
 // helper to safely call hooks.
 // All hooks are wrapped with recover() to prevent user-provided callbacks
-// from panicking and crashing cache operations.
+// from panicking and crashing cache operations. If OnPanic is set,
+// recovered values are reported through it for observability.
 func (h *MetricsHooks) hit(keyHash string, size int64) {
 	if h != nil && h.OnHit != nil {
-		defer func() { recover() }()
+		defer h.recoverHook("OnHit")
 		h.OnHit(keyHash, size)
 	}
 }
 
 func (h *MetricsHooks) miss(keyHash string) {
 	if h != nil && h.OnMiss != nil {
-		defer func() { recover() }()
+		defer h.recoverHook("OnMiss")
 		h.OnMiss(keyHash)
 	}
 }
 
 func (h *MetricsHooks) put(keyHash string, size int64, duration time.Duration) {
 	if h != nil && h.OnPut != nil {
-		defer func() { recover() }()
+		defer h.recoverHook("OnPut")
 		h.OnPut(keyHash, size, duration)
 	}
 }
 
 func (h *MetricsHooks) evict(keyHash string, size int64, reason EvictReason) {
 	if h != nil && h.OnEvict != nil {
-		defer func() { recover() }()
+		defer h.recoverHook("OnEvict")
 		h.OnEvict(keyHash, size, reason)
 	}
 }
 
 func (h *MetricsHooks) error(op string, err error) {
 	if h != nil && h.OnError != nil {
-		defer func() { recover() }()
+		defer h.recoverHook("OnError")
 		h.OnError(op, err)
+	}
+}
+
+// recoverHook recovers from panics in metrics hooks.
+// If OnPanic is set, the recovered value is reported; otherwise silently discarded.
+func (h *MetricsHooks) recoverHook(hookName string) {
+	if r := recover(); r != nil && h.OnPanic != nil {
+		h.OnPanic(hookName, r)
 	}
 }

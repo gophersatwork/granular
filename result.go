@@ -225,6 +225,9 @@ func (r *Result) DataIter() iter.Seq2[string, []byte] {
 // the error is written to errPtr and iteration stops.
 // Unlike DataErr(), this avoids materializing all entries into a map at once.
 func (r *Result) DataIterErr(errPtr *error) iter.Seq2[string, []byte] {
+	if errPtr == nil {
+		panic("granular: DataIterErr called with nil errPtr")
+	}
 	return func(yield func(string, []byte) bool) {
 		for name := range r.dataPaths {
 			data, err := r.BytesErr(name)

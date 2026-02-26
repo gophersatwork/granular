@@ -243,7 +243,9 @@ func (c *Cache) manifests(walkErr *error, corrupted *[]string) iter.Seq2[string,
 // Caller must hold the global write lock (c.mu).
 func (c *Cache) cleanupCorrupted(keyHashes []string) {
 	for _, keyHash := range keyHashes {
+		c.keyLocks.lockKey(keyHash)
 		_ = c.removeByHash(keyHash)
+		c.keyLocks.unlockKey(keyHash)
 	}
 }
 

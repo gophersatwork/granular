@@ -2,6 +2,7 @@ package granular
 
 import (
 	"archive/tar"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,9 +98,9 @@ func (c *Cache) Export(w io.Writer) error {
 			if err != nil {
 				return err
 			}
-			defer file.Close()
-			_, err = io.Copy(tw, file)
-			return err
+			_, copyErr := io.Copy(tw, file)
+			closeErr := file.Close()
+			return errors.Join(copyErr, closeErr)
 		}
 
 		return nil

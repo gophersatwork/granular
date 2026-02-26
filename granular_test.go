@@ -1367,3 +1367,156 @@ func TestCommitRollbackOnPartialFailure(t *testing.T) {
 		t.Fatal("Expected object directory to be cleaned up after failed Commit")
 	}
 }
+
+// TestDataIterErrNilPanics verifies that DataIterErr panics with a clear message
+// when called with a nil errPtr.
+func TestDataIterErrNilPanics(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-data-iter-err-nil-test")
+
+	key := cache.Key().String("k", "v").Build()
+	err := cache.Put(key).Bytes("x", []byte("hello")).Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("Expected panic from DataIterErr(nil)")
+		}
+		msg, ok := r.(string)
+		if !ok || msg != "granular: DataIterErr called with nil errPtr" {
+			t.Fatalf("Unexpected panic value: %v", r)
+		}
+	}()
+
+	//nolint:staticcheck // intentionally passing nil to test panic behavior
+	for range result.DataIterErr(nil) {
+		t.Fatal("Should not reach iteration body")
+	}
+}
+
+// TestGetCorruptedManifestAutoClean verifies that Get() auto-cleans a corrupted
+// (truncated JSON) manifest and returns ErrCacheCorrupted, followed by ErrCacheMiss.
+func TestGetCorruptedManifestAutoClean(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-corrupted-manifest-test")
+
+	// Write a corrupted manifest file directly
+	corruptedHash := "ab00112233445566"
+	mDir := filepath.Join(tempDir, "manifests", corruptedHash[:2])
+	createTestDir(t, memFs, mDir)
+	corruptedPath := filepath.Join(mDir, corruptedHash+".json")
+	createTestFile(t, memFs, corruptedPath, []byte("{truncated"))
+
+	// Build a key that maps to this hash — we can't easily do that,
+	// so instead create a valid entry, then corrupt its manifest.
+
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("test data"))
+
+	key := cache.Key().File(inputFile).Build()
+
+	outFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outFile, []byte("output"))
+
+	err := cache.Put(key).File("out", outFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Verify it works before corruption
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get before corruption")
+
+	// Now corrupt the manifest by overwriting with truncated JSON
+	keyHash, err := key.computeHash()
+	assertNoError(t, err, "computeHash")
+
+	manifestPath, err := cache.manifestPath(keyHash)
+	assertNoError(t, err, "manifestPath")
+
+	createTestFile(t, memFs, manifestPath, []byte("{truncated"))
+
+	// Get should return ErrCacheCorrupted and auto-clean
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrCacheCorrupted) {
+		t.Fatalf("Expected ErrCacheCorrupted, got: %v", err)
+	}
+
+	// Manifest should be cleaned up — next Get returns ErrCacheMiss
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("Expected ErrCacheMiss after auto-clean, got: %v", err)
+	}
+
+	// Verify the manifest file is gone
+	exists, err := afero.Exists(memFs, manifestPath)
+	assertNoError(t, err, "check manifest after auto-clean")
+	if exists {
+		t.Fatal("Expected corrupted manifest to be removed")
+	}
+}
+
+// TestMetricsOnPanicCallback verifies that a panicking metrics hook calls OnPanic
+// and does not crash the cache operation.
+func TestMetricsOnPanicCallback(t *testing.T) {
+	var panicHook string
+	var panicValue any
+
+	hooks := &MetricsHooks{
+		OnHit: func(string, int64) {
+			panic("boom from OnHit")
+		},
+		OnPanic: func(hook string, value any) {
+			panicHook = hook
+			panicValue = value
+		},
+	}
+
+	cache, memFs, tempDir := setupTestCache(t, "granular-metrics-panic-test")
+	cache.metrics = hooks
+
+	// Create and cache an entry
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("data"))
+
+	key := cache.Key().File(inputFile).Build()
+	outFile := filepath.Join(tempDir, "out.txt")
+	createTestFile(t, memFs, outFile, []byte("output"))
+
+	err := cache.Put(key).File("out", outFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Get triggers OnHit which panics — should be recovered
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get should succeed despite panicking OnHit")
+
+	// Verify OnPanic was called
+	if panicHook != "OnHit" {
+		t.Fatalf("Expected OnPanic hook='OnHit', got %q", panicHook)
+	}
+	if panicValue != "boom from OnHit" {
+		t.Fatalf("Expected OnPanic value='boom from OnHit', got %v", panicValue)
+	}
+}
+
+// TestMetricsOnPanicNilSilentRecover verifies that without OnPanic set,
+// panics in hooks are still silently recovered (backward compatible).
+func TestMetricsOnPanicNilSilentRecover(t *testing.T) {
+	hooks := &MetricsHooks{
+		OnMiss: func(string) {
+			panic("boom from OnMiss")
+		},
+		// OnPanic intentionally nil
+	}
+
+	cache, _, _ := setupTestCache(t, "granular-metrics-silent-recover-test")
+	cache.metrics = hooks
+
+	key := cache.Key().String("k", "v").Build()
+
+	// Get triggers OnMiss which panics — should be silently recovered
+	_, err := cache.Get(key)
+	if !errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("Expected ErrCacheMiss, got: %v", err)
+	}
+}
