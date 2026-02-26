@@ -9,6 +9,8 @@ import (
 	"maps"
 	"path/filepath"
 	"time"
+
+	"github.com/spf13/afero"
 )
 
 // Result represents a cached result with support for multiple files and data.
@@ -290,6 +292,19 @@ func (r *Result) Size() int64 {
 // Useful for debugging and logging.
 func (r *Result) KeyHash() string {
 	return r.keyHash
+}
+
+// Valid reports whether this Result's underlying cache entry still exists on disk.
+// Returns false after the entry has been removed by Delete, Prune, Clear, or GC.
+// This is a point-in-time check — the entry could be deleted immediately after
+// Valid returns true.
+func (r *Result) Valid() bool {
+	mPath, err := r.cache.manifestPath(r.keyHash)
+	if err != nil {
+		return false
+	}
+	exists, err := afero.Exists(r.cache.fs, mPath)
+	return err == nil && exists
 }
 
 // DataNames returns an iterator over the names of all data entries in the result.

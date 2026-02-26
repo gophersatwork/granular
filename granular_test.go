@@ -1192,6 +1192,42 @@ func TestDataIterErr_EarlyBreak(t *testing.T) {
 	}
 }
 
+// TestResultValidDetectsStaleness verifies that Valid() returns false after
+// the cache entry has been deleted.
+func TestResultValidDetectsStaleness(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-valid-test")
+
+	// Create and cache an entry
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("input"))
+
+	key := cache.Key().File(inputFile).Build()
+
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("output"))
+
+	err := cache.Put(key).File("out", outputFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Get the result
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	// Valid should return true
+	if !result.Valid() {
+		t.Fatal("Expected Valid() to return true for live entry")
+	}
+
+	// Delete the entry
+	err = cache.Delete(key)
+	assertNoError(t, err, "Delete")
+
+	// Valid should now return false
+	if result.Valid() {
+		t.Fatal("Expected Valid() to return false after Delete")
+	}
+}
+
 // TestStatsSkipsCorruptedManifest verifies that Stats() under RLock does not
 // delete a corrupted manifest — the entry is just skipped.
 func TestStatsSkipsCorruptedManifest(t *testing.T) {
