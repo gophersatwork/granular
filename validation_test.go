@@ -111,7 +111,7 @@ func TestValidationError_ErrorsIs(t *testing.T) {
 	}
 }
 
-// CustomError is a custom error type for testing errors.As()
+// CustomError is a custom error type for testing errors.AsType()
 type CustomError struct {
 	Code int
 	Msg  string
@@ -121,7 +121,7 @@ func (ce *CustomError) Error() string {
 	return fmt.Sprintf("code %d: %s", ce.Code, ce.Msg)
 }
 
-// TestValidationError_ErrorsAs tests errors.As() compatibility
+// TestValidationError_ErrorsAs tests errors.AsType() compatibility
 func TestValidationError_ErrorsAs(t *testing.T) {
 	customErr := &CustomError{Code: 404, Msg: "not found"}
 

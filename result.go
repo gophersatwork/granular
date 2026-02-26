@@ -182,6 +182,44 @@ func (r *Result) DataErr() (map[string][]byte, error) {
 	return result, nil
 }
 
+// DataIter returns an iterator over all data entries as name-bytes pairs.
+// Data is lazy-loaded from disk on each iteration. Entries that fail to read
+// are silently skipped. Use DataIterErr for explicit error handling.
+// Unlike Data(), this avoids materializing all entries into a map at once.
+func (r *Result) DataIter() iter.Seq2[string, []byte] {
+	return func(yield func(string, []byte) bool) {
+		for name := range r.dataPaths {
+			data := r.Bytes(name)
+			if data != nil {
+				if !yield(name, bytes.Clone(data)) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// DataIterErr returns an iterator over all data entries as name-bytes pairs,
+// with explicit error handling via errPtr. If a read or decompression fails,
+// the error is written to errPtr and iteration stops.
+// Unlike DataErr(), this avoids materializing all entries into a map at once.
+func (r *Result) DataIterErr(errPtr *error) iter.Seq2[string, []byte] {
+	return func(yield func(string, []byte) bool) {
+		for name := range r.dataPaths {
+			data, err := r.BytesErr(name)
+			if err != nil {
+				*errPtr = fmt.Errorf("failed to load data %s: %w", name, err)
+				return
+			}
+			if data != nil {
+				if !yield(name, bytes.Clone(data)) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // HasData returns true if data with the given name exists in the cache.
 func (r *Result) HasData(name string) bool {
 	_, ok := r.dataPaths[name]

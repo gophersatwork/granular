@@ -1060,3 +1060,134 @@ func TestCacheGCMultipleOrphans(t *testing.T) {
 		}
 	}
 }
+
+func TestDataIter(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-data-iter-test")
+
+	key := cache.Key().String("version", "1.0").Build()
+	err := cache.Put(key).
+		Bytes("alpha", []byte("aaa")).
+		Bytes("beta", []byte("bbb")).
+		Bytes("gamma", []byte("ccc")).
+		Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	// Collect all entries from iterator
+	collected := make(map[string][]byte)
+	for name, data := range result.DataIter() {
+		collected[name] = data
+	}
+
+	if len(collected) != 3 {
+		t.Fatalf("DataIter yielded %d entries, want 3", len(collected))
+	}
+	assertBytesEqual(t, collected["alpha"], []byte("aaa"), "alpha")
+	assertBytesEqual(t, collected["beta"], []byte("bbb"), "beta")
+	assertBytesEqual(t, collected["gamma"], []byte("ccc"), "gamma")
+}
+
+func TestDataIter_EarlyBreak(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-data-iter-break-test")
+
+	key := cache.Key().String("version", "1.0").Build()
+	err := cache.Put(key).
+		Bytes("a", []byte("1")).
+		Bytes("b", []byte("2")).
+		Bytes("c", []byte("3")).
+		Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	// Break after first entry
+	count := 0
+	for range result.DataIter() {
+		count++
+		break
+	}
+
+	if count != 1 {
+		t.Fatalf("Expected 1 iteration before break, got %d", count)
+	}
+}
+
+func TestDataIter_Empty(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-data-iter-empty-test")
+
+	testFile := filepath.Join(tempDir, "f.txt")
+	createTestFile(t, memFs, testFile, []byte("content"))
+
+	key := cache.Key().File(testFile).Build()
+	// Put with only a file, no bytes data
+	err := cache.Put(key).File("out", testFile).Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	count := 0
+	for range result.DataIter() {
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("DataIter on result with no data yielded %d entries, want 0", count)
+	}
+}
+
+func TestDataIterErr(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-data-iter-err-test")
+
+	key := cache.Key().String("version", "1.0").Build()
+	err := cache.Put(key).
+		Bytes("x", []byte("hello")).
+		Bytes("y", []byte("world")).
+		Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	collected := make(map[string][]byte)
+	var iterErr error
+	for name, data := range result.DataIterErr(&iterErr) {
+		collected[name] = data
+	}
+
+	assertNoError(t, iterErr, "DataIterErr")
+	if len(collected) != 2 {
+		t.Fatalf("DataIterErr yielded %d entries, want 2", len(collected))
+	}
+	assertBytesEqual(t, collected["x"], []byte("hello"), "x")
+	assertBytesEqual(t, collected["y"], []byte("world"), "y")
+}
+
+func TestDataIterErr_EarlyBreak(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-data-iter-err-break-test")
+
+	key := cache.Key().String("version", "1.0").Build()
+	err := cache.Put(key).
+		Bytes("a", []byte("1")).
+		Bytes("b", []byte("2")).
+		Bytes("c", []byte("3")).
+		Commit()
+	assertNoError(t, err, "Put")
+
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get")
+
+	var iterErr error
+	count := 0
+	for range result.DataIterErr(&iterErr) {
+		count++
+		break
+	}
+
+	assertNoError(t, iterErr, "DataIterErr after early break")
+	if count != 1 {
+		t.Fatalf("Expected 1 iteration before break, got %d", count)
+	}
+}
