@@ -3,7 +3,9 @@ package granular
 import (
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/spf13/afero"
@@ -164,10 +166,7 @@ func (wb *WriteBuilder) Commit() error {
 	}
 
 	// Create output file list for hash computation (use cached paths for consistency with verification)
-	cachedFilePaths := make([]string, 0, len(cachedFiles))
-	for _, cachedPath := range cachedFiles {
-		cachedFilePaths = append(cachedFilePaths, cachedPath)
-	}
+	cachedFilePaths := slices.Collect(maps.Values(cachedFiles))
 
 	// Read back the compressed data from .dat files for hash computation
 	// This ensures the hash matches what verification will compute

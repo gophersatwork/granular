@@ -356,6 +356,52 @@ func FuzzManifestOutputHash(f *testing.F) {
 	})
 }
 
+// FuzzValidateArchivePath fuzzes the path validation used in Import to find
+// path traversal bypasses. validateArchivePath handles attacker-controlled tar paths
+// with filepath.IsAbs, filepath.Clean, strings.Contains, filepath.Abs, and
+// strings.HasPrefix — all of which have subtle platform behavior.
+func FuzzValidateArchivePath(f *testing.F) {
+	// Seed corpus: known attacks and edge cases
+	f.Add("../../../etc/passwd")
+	f.Add("manifests/../../../tmp/evil")
+	f.Add("/absolute/path")
+	f.Add("normal/path/file.json")
+	f.Add("")
+	f.Add(".")
+	f.Add("..")
+	f.Add("..\\..\\etc\\passwd")
+	f.Add("manifests/ab/abc123.json")
+	f.Add("objects/de/deadbeef/file.dat")
+	f.Add("a/b/c/d/e/f/g")
+	f.Add(strings.Repeat("a", 1000))
+	f.Add("valid/../../../escape")
+	f.Add("./relative")
+	f.Add("manifests/../../outside")
+
+	f.Fuzz(func(t *testing.T, name string) {
+		baseDir := "/cache"
+
+		target, err := validateArchivePath(name, baseDir)
+		if err != nil {
+			// Rejected — this is fine, the function is doing its job
+			return
+		}
+
+		// If accepted, the resolved path MUST be within baseDir.
+		// This is the critical safety invariant.
+		if !strings.HasPrefix(target, baseDir+"/") && target != baseDir {
+			t.Errorf("validateArchivePath accepted path that escapes base dir:\n  name=%q\n  baseDir=%q\n  target=%q",
+				name, baseDir, target)
+		}
+
+		// The accepted path must not contain ".."
+		if strings.Contains(target, "..") {
+			t.Errorf("validateArchivePath accepted path containing '..':\n  name=%q\n  target=%q",
+				name, target)
+		}
+	})
+}
+
 // FuzzValidationErrors fuzzes error accumulation
 func FuzzValidationErrors(f *testing.F) {
 	// Seed with various error messages

@@ -10,14 +10,14 @@ const numKeyShards = 256
 // Uses a sharded approach with numKeyShards shards to balance parallelism and memory overhead.
 // The shard is determined by the first two hex characters of the key hash, parsed as a byte.
 type keyLocks struct {
-	shards [numKeyShards]*sync.RWMutex
+	shards [numKeyShards]*sync.Mutex
 }
 
 // newKeyLocks creates a new keyLocks instance with initialized shards.
 func newKeyLocks() *keyLocks {
 	kl := &keyLocks{}
 	for i := range kl.shards {
-		kl.shards[i] = &sync.RWMutex{}
+		kl.shards[i] = &sync.Mutex{}
 	}
 	return kl
 }

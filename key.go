@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -353,11 +354,7 @@ func (k Key) computeHash() (string, error) {
 
 	// Hash extras in sorted order for determinism
 	if len(k.extras) > 0 {
-		keys := make([]string, 0, len(k.extras))
-		for k := range k.extras {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
+		keys := slices.Sorted(maps.Keys(k.extras))
 
 		for _, key := range keys {
 			// Length-prefix key and value to prevent collisions:

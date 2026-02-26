@@ -146,15 +146,22 @@ func (c *Cache) Import(r io.Reader) error {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
 
-			file, err := c.fs.Create(targetPath)
+			// Use atomic write (tmp + rename) to avoid partial files on crash
+			tmpPath := targetPath + ".tmp." + randomSuffix()
+			file, err := c.fs.Create(tmpPath)
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
 			}
 			if _, err := io.Copy(file, tr); err != nil {
 				file.Close()
+				_ = c.fs.Remove(tmpPath)
 				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
 			}
 			file.Close()
+			if err := c.fs.Rename(tmpPath, targetPath); err != nil {
+				_ = c.fs.Remove(tmpPath)
+				return fmt.Errorf("failed to rename temp file %s: %w", targetPath, err)
+			}
 		}
 	}
 

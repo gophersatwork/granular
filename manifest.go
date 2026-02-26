@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -138,11 +139,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 
 	// Hash output data
 	// Sort keys for deterministic ordering
-	dataKeys := make([]string, 0, len(outputData))
-	for k := range outputData {
-		dataKeys = append(dataKeys, k)
-	}
-	slices.Sort(dataKeys)
+	dataKeys := slices.Sorted(maps.Keys(outputData))
 
 	// Hash the number of data entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(dataKeys))))
@@ -156,11 +153,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 
 	// Hash output meta
 	// Sort keys for deterministic ordering
-	metaKeys := make([]string, 0, len(outputMeta))
-	for k := range outputMeta {
-		metaKeys = append(metaKeys, k)
-	}
-	slices.Sort(metaKeys)
+	metaKeys := slices.Sorted(maps.Keys(outputMeta))
 
 	// Hash the number of meta entries first
 	h.Write([]byte(fmt.Sprintf("%d", len(metaKeys))))
@@ -190,17 +183,8 @@ func (c *Cache) hashOutputFile(h io.Writer, path string) error {
 	buffer := *bufPtr
 	defer bufferPool.Put(bufPtr)
 
-	for {
-		n, readErr := file.Read(buffer)
-		if readErr != nil && readErr != io.EOF {
-			return fmt.Errorf("failed to read output file %s: %w", path, readErr)
-		}
-		if n > 0 {
-			h.Write(buffer[:n])
-		}
-		if readErr == io.EOF {
-			break
-		}
+	if _, err := io.CopyBuffer(h, file, buffer); err != nil {
+		return fmt.Errorf("failed to read output file %s: %w", path, err)
 	}
 
 	return nil
@@ -212,10 +196,7 @@ func (c *Cache) hashOutputFile(h io.Writer, path string) error {
 func (c *Cache) verifyOutputHash(m *manifest) error {
 	// Extract cached file paths from the manifest
 	// m.OutputFiles maps logical names to cached file paths
-	cachedPaths := make([]string, 0, len(m.OutputFiles))
-	for _, cachedPath := range m.OutputFiles {
-		cachedPaths = append(cachedPaths, cachedPath)
-	}
+	cachedPaths := slices.Collect(maps.Values(m.OutputFiles))
 
 	// Load data from .dat files for hash verification
 	// Read the raw (possibly compressed) data to match what was stored during commit

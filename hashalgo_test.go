@@ -111,6 +111,65 @@ func TestHashAlgoMismatchWithSameKeyHash(t *testing.T) {
 	}
 }
 
+// TestHashAlgoMismatchReturnsSentinel injects a manifest with a different HashAlgo
+// than the cache's configured algorithm, triggering the ErrHashAlgoMismatch code path.
+// The existing TestHashAlgoMismatch only proves different hash functions produce
+// different key hashes (ErrCacheMiss). This test exercises the actual mismatch sentinel
+// where the key hash collides but the algorithm field differs.
+func TestHashAlgoMismatchReturnsSentinel(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	err := afero.WriteFile(fs, "test.txt", []byte("content"), 0o644)
+	if err != nil {
+		t.FailNow()
+	}
+
+	// Create cache with default xxHash
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	// Store an entry normally
+	key := cache.Key().File("test.txt").Build()
+	err = cache.Put(key).Bytes("output", []byte("data")).Commit()
+	if err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// Verify it works before tampering
+	result, err := cache.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected result")
+	}
+
+	// Tamper with the manifest: change the HashAlgo field to a different value.
+	// The key hash is the same, so the manifest will be found, but the algo check fails.
+	keyHash, err := key.computeHash()
+	if err != nil {
+		t.Fatalf("computeHash failed: %v", err)
+	}
+
+	m, err := cache.loadManifest(keyHash)
+	if err != nil {
+		t.Fatalf("loadManifest failed: %v", err)
+	}
+
+	m.HashAlgo = "sha256" // different from the cache's "xxhash64"
+	err = cache.saveManifest(m)
+	if err != nil {
+		t.Fatalf("saveManifest failed: %v", err)
+	}
+
+	// Get() should now return ErrHashAlgoMismatch
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrHashAlgoMismatch) {
+		t.Fatalf("Expected ErrHashAlgoMismatch, got: %v", err)
+	}
+}
+
 // TestWithXXHash tests the xxHash convenience option
 func TestWithXXHash(t *testing.T) {
 	fs := afero.NewMemMapFs()

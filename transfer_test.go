@@ -4,9 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/afero"
 )
 
 func TestExportCreatesValidTar(t *testing.T) {
@@ -163,6 +166,112 @@ func TestExportImportRoundTrip(t *testing.T) {
 			t.Fatalf("Data mismatch: expected %q, got %q", expectedData, actualData)
 		}
 	}
+}
+
+// TestImportAtomicWriteNoTmpLeftOnError tests that Import's atomic write
+// pattern cleans up .tmp files when the tar stream is truncated mid-file.
+func TestImportAtomicWriteNoTmpLeftOnError(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "import-atomic-test")
+
+	// Create a tar with a valid directory entry followed by a file entry whose
+	// body is truncated (simulating a crash/corrupted archive mid-import).
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	// Write a directory entry (succeeds)
+	err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     "manifests/ab/",
+		Mode:     0o755,
+	})
+	assertNoError(t, err, "WriteHeader dir")
+
+	// Write a file header claiming 1000 bytes, but we'll only provide partial data
+	err = tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "manifests/ab/abc123.json",
+		Mode:     0o644,
+		Size:     1000,
+	})
+	assertNoError(t, err, "WriteHeader file")
+
+	// Write only 50 bytes (less than the declared 1000)
+	_, err = tw.Write([]byte(strings.Repeat("x", 50)))
+	assertNoError(t, err, "partial Write")
+
+	// Don't close the tar writer properly — truncate
+	// The tar.Reader will fail when reading the incomplete entry
+
+	// Import should fail due to truncated tar
+	err = cache.Import(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatal("Expected Import to fail on truncated tar")
+	}
+
+	// Verify no .tmp files were left behind in the cache
+	var tmpFiles []string
+	_ = afero.Walk(memFs, tempDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() && strings.Contains(path, ".tmp.") {
+			tmpFiles = append(tmpFiles, path)
+		}
+		return nil
+	})
+
+	if len(tmpFiles) > 0 {
+		t.Fatalf("Found leftover .tmp files after failed Import: %v", tmpFiles)
+	}
+}
+
+// TestImportAtomicWriteSuccessNoTmpFiles verifies that after a successful Import,
+// no .tmp files remain in the cache directory.
+func TestImportAtomicWriteSuccessNoTmpFiles(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "import-atomic-success-test")
+
+	// Create a valid cache entry, export it, then reimport
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("test data"))
+
+	key := cache.Key().File(inputFile).String("v", "1").Build()
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("output data"))
+
+	err := cache.Put(key).File("out", outputFile).Commit()
+	assertNoError(t, err, "Put")
+
+	// Export
+	var buf bytes.Buffer
+	err = cache.Export(&buf)
+	assertNoError(t, err, "Export")
+
+	// Clear and reimport
+	err = cache.Clear()
+	assertNoError(t, err, "Clear")
+
+	err = cache.Import(&buf)
+	assertNoError(t, err, "Import")
+
+	// Verify no .tmp files exist after successful import
+	var tmpFiles []string
+	_ = afero.Walk(memFs, tempDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() && strings.Contains(path, ".tmp.") {
+			tmpFiles = append(tmpFiles, path)
+		}
+		return nil
+	})
+
+	if len(tmpFiles) > 0 {
+		t.Fatalf("Found leftover .tmp files after successful Import: %v", tmpFiles)
+	}
+
+	// Verify the entry is accessible
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get after reimport")
 }
 
 func TestImportRejectsPathTraversal(t *testing.T) {

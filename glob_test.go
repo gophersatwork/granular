@@ -490,7 +490,7 @@ func TestGlobDeterminism(t *testing.T) {
 
 	// Run glob multiple times
 	var hashes []string
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		cache, err := Open(".cache", WithFs(fs))
 		if err != nil {
 			t.Fatalf("Open failed: %v", err)

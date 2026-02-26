@@ -3,12 +3,15 @@ package granular
 import (
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"time"
 )
 
 // Result represents a cached result with support for multiple files and data.
 // Users should not construct this directly - it's returned by Cache.Get().
+//
+// A Result is not safe for concurrent use by multiple goroutines.
 type Result struct {
 	keyHash     string
 	cache       *Cache
@@ -29,11 +32,7 @@ func (r *Result) File(name string) string {
 
 // Files returns all cached files as a map of name -> path.
 func (r *Result) Files() map[string]string {
-	result := make(map[string]string, len(r.files))
-	for k, v := range r.files {
-		result[k] = v
-	}
-	return result
+	return maps.Clone(r.files)
 }
 
 // HasFile returns true if a file with the given name exists in the cache.
@@ -177,11 +176,7 @@ func (r *Result) Meta(key string) string {
 
 // Metadata returns all metadata as a map.
 func (r *Result) Metadata() map[string]string {
-	result := make(map[string]string, len(r.metadata))
-	for k, v := range r.metadata {
-		result[k] = v
-	}
-	return result
+	return maps.Clone(r.metadata)
 }
 
 // HasMeta returns true if metadata with the given key exists.

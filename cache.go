@@ -19,6 +19,12 @@ const hashPrefixLen = 2
 
 // Cache represents the main cache structure.
 // It provides content-addressed storage for files and data.
+//
+// Lock hierarchy (acquire in this order to prevent deadlocks):
+//  1. c.mu        — global RWMutex for bulk operations (Clear, Prune, GC, eviction)
+//  2. c.keyLocks  — per-key sharded Mutex for individual entry operations (Get, Put, Delete, Has)
+//
+// Never acquire c.mu while holding a keyLock.
 type Cache struct {
 	root             string
 	hashFunc         HashFunc
@@ -261,23 +267,7 @@ func (c *Cache) Delete(key Key) error {
 // deleteByKeyHash removes a cache entry by key hash.
 // Caller must hold the key lock.
 func (c *Cache) deleteByKeyHash(keyHash string) error {
-	// Remove manifest
-	manifestPath := c.manifestPath(keyHash)
-	if exists, _ := afero.Exists(c.fs, manifestPath); exists {
-		if err := c.fs.Remove(manifestPath); err != nil {
-			return fmt.Errorf("failed to remove manifest: %w", err)
-		}
-	}
-
-	// Remove object directory
-	objectDir := c.objectPath(keyHash)
-	if exists, _ := afero.Exists(c.fs, objectDir); exists {
-		if err := c.fs.RemoveAll(objectDir); err != nil {
-			return fmt.Errorf("failed to remove objects: %w", err)
-		}
-	}
-
-	return nil
+	return c.removeByHash(keyHash)
 }
 
 // Clear removes all entries from the cache.

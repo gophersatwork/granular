@@ -215,7 +215,7 @@ func TestMetricsHooks_OnEvict_Clear(t *testing.T) {
 	defer cache.Close()
 
 	// Add multiple entries
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key := cache.Key().String("index", fmt.Sprintf("%d", i)).Build()
 		err = cache.Put(key).Bytes("data", []byte("hello")).Commit()
 		if err != nil {

@@ -2,6 +2,7 @@ package granular
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -926,6 +927,92 @@ func TestCacheGCEmptyCache(t *testing.T) {
 	}
 	if bytesReclaimed != 0 {
 		t.Fatalf("Expected 0 bytes reclaimed, got %d", bytesReclaimed)
+	}
+}
+
+// TestGetReturnsCorruptedOnTamperedData puts an entry, corrupts the cached data
+// file on disk, then verifies Get() returns ErrCacheCorrupted.
+func TestGetReturnsCorruptedOnTamperedData(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-corruption-test")
+
+	// Create and cache an entry with both file and bytes data
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("input content"))
+
+	key := cache.Key().File(inputFile).Build()
+
+	outputFile := filepath.Join(tempDir, "output.txt")
+	createTestFile(t, memFs, outputFile, []byte("original output"))
+
+	err := cache.Put(key).
+		File("result", outputFile).
+		Bytes("data", []byte("binary payload")).
+		Meta("version", "1").
+		Commit()
+	assertNoError(t, err, "Put")
+
+	// Verify the entry is readable before corruption
+	result, err := cache.Get(key)
+	assertCacheHit(t, result, err, "Get before corruption")
+
+	// Locate the cached output file and corrupt it
+	cachedFilePath := result.File("result")
+	if cachedFilePath == "" {
+		t.Fatal("Expected cached file path")
+	}
+
+	// Tamper with the cached file content
+	err = afero.WriteFile(memFs, cachedFilePath, []byte("CORRUPTED"), 0o644)
+	assertNoError(t, err, "corrupting cached file")
+
+	// Get() should now detect corruption via verifyOutputHash
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrCacheCorrupted) {
+		t.Fatalf("Expected ErrCacheCorrupted, got: %v", err)
+	}
+
+	// The corrupted entry should have been auto-deleted
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("Expected ErrCacheMiss after corruption cleanup, got: %v", err)
+	}
+}
+
+// TestGetReturnsCorruptedOnTamperedBytes is like TestGetReturnsCorruptedOnTamperedData
+// but corrupts the .dat bytes file instead of the output file.
+func TestGetReturnsCorruptedOnTamperedBytes(t *testing.T) {
+	cache, memFs, tempDir := setupTestCache(t, "granular-corruption-bytes-test")
+
+	inputFile := filepath.Join(tempDir, "input.txt")
+	createTestFile(t, memFs, inputFile, []byte("input"))
+
+	key := cache.Key().File(inputFile).Build()
+
+	err := cache.Put(key).
+		Bytes("payload", []byte("important data")).
+		Commit()
+	assertNoError(t, err, "Put")
+
+	// Load the manifest to find the .dat file path
+	keyHash, err := key.computeHash()
+	assertNoError(t, err, "computeHash")
+
+	m, err := cache.loadManifest(keyHash)
+	assertNoError(t, err, "loadManifest")
+
+	datPath := m.OutputData["payload"]
+	if datPath == "" {
+		t.Fatal("Expected .dat file path in manifest")
+	}
+
+	// Corrupt the .dat file
+	err = afero.WriteFile(memFs, datPath, []byte("TAMPERED"), 0o644)
+	assertNoError(t, err, "corrupting .dat file")
+
+	// Get() should detect corruption
+	_, err = cache.Get(key)
+	if !errors.Is(err, ErrCacheCorrupted) {
+		t.Fatalf("Expected ErrCacheCorrupted, got: %v", err)
 	}
 }
 

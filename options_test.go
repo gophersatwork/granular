@@ -256,7 +256,7 @@ func TestWithNowFunc_Stats(t *testing.T) {
 	}(cache)
 
 	// Create entries - each Commit calls nowFunc twice (CreatedAt and AccessedAt)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := cache.Key().File("test.txt").String("day", string(rune('0'+i))).Build()
 		err := cache.Put(key).Bytes("output", []byte("data")).Commit()
 		if err != nil {
