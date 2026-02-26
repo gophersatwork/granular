@@ -562,3 +562,213 @@ func TestKeyBuilder_ValidateMultipleExcludePatterns(t *testing.T) {
 		}
 	})
 }
+
+// TestWriteBuilder_DoubleCommit tests that calling Commit() twice returns an error.
+func TestWriteBuilder_DoubleCommit(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	key := cache.Key().String("test", "double").Build()
+
+	wb := cache.Put(key).Bytes("data", []byte("hello"))
+
+	// First commit should succeed
+	if err := wb.Commit(); err != nil {
+		t.Fatalf("first Commit should succeed: %v", err)
+	}
+
+	// Second commit should fail
+	err = wb.Commit()
+	if err == nil {
+		t.Fatal("second Commit should return error")
+	}
+	if !strings.Contains(err.Error(), "already committed") {
+		t.Fatalf("expected 'already committed' error, got: %v", err)
+	}
+}
+
+// TestMaxDataSize tests that decompressed data exceeding maxDataSize is rejected.
+func TestMaxDataSize(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs), WithMaxDataSize(50))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	key := cache.Key().String("test", "maxdata").Build()
+
+	// Store data larger than the limit (no compression, so decompressed = raw)
+	bigData := make([]byte, 100)
+	for i := range bigData {
+		bigData[i] = byte(i)
+	}
+
+	err = cache.Put(key).Bytes("big", bigData).Commit()
+	if err != nil {
+		t.Fatalf("Put should succeed (limit is on read, not write): %v", err)
+	}
+
+	// Reading should fail
+	result, err := cache.Get(key)
+	if err != nil {
+		t.Fatalf("Get should succeed: %v", err)
+	}
+
+	_, err = result.BytesErr("big")
+	if err == nil {
+		t.Fatal("expected error for oversized data read")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Fatalf("expected 'exceeds max size' error, got: %v", err)
+	}
+
+	// Data within the limit should work
+	smallData := []byte("small")
+	key2 := cache.Key().String("test", "small").Build()
+	err = cache.Put(key2).Bytes("ok", smallData).Commit()
+	if err != nil {
+		t.Fatalf("Put small data failed: %v", err)
+	}
+
+	result2, err := cache.Get(key2)
+	if err != nil {
+		t.Fatalf("Get small data failed: %v", err)
+	}
+
+	got, err := result2.BytesErr("ok")
+	if err != nil {
+		t.Fatalf("BytesErr should succeed for small data: %v", err)
+	}
+	if string(got) != "small" {
+		t.Fatalf("expected 'small', got %q", got)
+	}
+}
+
+// TestEmptyKey tests that a key with no inputs produces a validation error.
+func TestEmptyKey(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	key := cache.Key().Build()
+
+	// Get should fail with validation error
+	_, err = cache.Get(key)
+	if err == nil {
+		t.Fatal("expected error for empty key")
+	}
+
+	_, ok := errors.AsType[*ValidationError](err)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T: %v", err, err)
+	}
+
+	if !strings.Contains(err.Error(), "key has no inputs") {
+		t.Fatalf("expected 'key has no inputs' error, got: %v", err)
+	}
+
+	// Commit should also fail
+	err = cache.Put(key).Bytes("data", []byte("hello")).Commit()
+	if err == nil {
+		t.Fatal("expected error for empty key on Put")
+	}
+
+	if !strings.Contains(err.Error(), "key has no inputs") {
+		t.Fatalf("expected 'key has no inputs' error, got: %v", err)
+	}
+}
+
+// TestWriteBuilder_NameInjection tests that path traversal in File/Bytes names is rejected.
+func TestWriteBuilder_NameInjection(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	// Create a valid source file for File() tests
+	afero.WriteFile(fs, "/src/test.txt", []byte("hello"), 0o644)
+
+	key := cache.Key().String("test", "value").Build()
+
+	badNames := []string{
+		"../escape",
+		"foo/bar",
+		"foo\\bar",
+		"..\\escape",
+		"foo\x00bar",
+	}
+
+	for _, name := range badNames {
+		t.Run("File_"+fmt.Sprintf("%q", name), func(t *testing.T) {
+			err := cache.Put(key).File(name, "/src/test.txt").Commit()
+			if err == nil {
+				t.Fatalf("expected error for name %q, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "invalid name") {
+				t.Fatalf("expected 'invalid name' error, got: %v", err)
+			}
+		})
+
+		t.Run("Bytes_"+fmt.Sprintf("%q", name), func(t *testing.T) {
+			err := cache.Put(key).Bytes(name, []byte("data")).Commit()
+			if err == nil {
+				t.Fatalf("expected error for name %q, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "invalid name") {
+				t.Fatalf("expected 'invalid name' error, got: %v", err)
+			}
+		})
+	}
+
+	// Empty name should be rejected
+	t.Run("File_empty", func(t *testing.T) {
+		err := cache.Put(key).File("", "/src/test.txt").Commit()
+		if err == nil {
+			t.Fatal("expected error for empty name")
+		}
+		if !strings.Contains(err.Error(), "must not be empty") {
+			t.Fatalf("expected 'must not be empty' error, got: %v", err)
+		}
+	})
+
+	t.Run("Bytes_empty", func(t *testing.T) {
+		err := cache.Put(key).Bytes("", []byte("data")).Commit()
+		if err == nil {
+			t.Fatal("expected error for empty name")
+		}
+		if !strings.Contains(err.Error(), "must not be empty") {
+			t.Fatalf("expected 'must not be empty' error, got: %v", err)
+		}
+	})
+
+	// Valid names should still work (including names containing ".." as a substring)
+	t.Run("valid names", func(t *testing.T) {
+		err := cache.Put(key).
+			File("output", "/src/test.txt").
+			Bytes("config", []byte("data")).
+			Commit()
+		if err != nil {
+			t.Fatalf("valid names should succeed: %v", err)
+		}
+	})
+
+	t.Run("valid name with dots", func(t *testing.T) {
+		err := cache.Put(key).
+			File("version..2", "/src/test.txt").
+			Bytes("report..final", []byte("data")).
+			Commit()
+		if err != nil {
+			t.Fatalf("names containing '..' as substring should succeed: %v", err)
+		}
+	})
+}

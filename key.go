@@ -302,10 +302,10 @@ func (kb *KeyBuilder) Env(key string) *KeyBuilder {
 // when the key is used in Get() or Commit().
 func (kb *KeyBuilder) Build() Key {
 	return Key{
-		inputs: kb.inputs,
-		extras: kb.extras,
+		inputs: slices.Clone(kb.inputs),
+		extras: maps.Clone(kb.extras),
 		cache:  kb.cache,
-		errors: kb.errors,
+		errors: slices.Clone(kb.errors),
 	}
 }
 
@@ -338,6 +338,13 @@ func (k Key) computeHash() (string, error) {
 	// Check for validation errors first
 	if len(k.errors) > 0 {
 		return "", newValidationError(k.errors)
+	}
+
+	// Reject empty keys with no inputs
+	if len(k.inputs) == 0 && len(k.extras) == 0 {
+		return "", newValidationError([]error{
+			fmt.Errorf("key has no inputs: add at least one File, Glob, Dir, Bytes, String, or Version input"),
+		})
 	}
 
 	h := k.cache.newHash()

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/afero"
@@ -18,13 +19,17 @@ import (
 // Ensure os.FileMode is used (for atomicWriteFile parameter type)
 var _ os.FileMode
 
+// suffixCounter is a process-wide counter used in the randomSuffix fallback
+// to prevent collisions when crypto/rand is unavailable.
+var suffixCounter atomic.Uint64
+
 // randomSuffix generates a random suffix for temporary files.
 // Uses crypto/rand for unpredictable suffixes to avoid collisions.
 func randomSuffix() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to time-based suffix if crypto/rand fails
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		// Fallback: timestamp + monotonic counter to prevent collisions
+		return fmt.Sprintf("%d-%d", time.Now().UnixNano(), suffixCounter.Add(1))
 	}
 	return hex.EncodeToString(b)
 }

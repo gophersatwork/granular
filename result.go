@@ -145,6 +145,7 @@ func (r *Result) BytesErr(name string) ([]byte, error) {
 }
 
 // readCompressedFile reads a file and decompresses it if needed.
+// Limits the decompressed size to prevent OOM from corrupted/malicious data.
 func (r *Result) readCompressedFile(path string) ([]byte, error) {
 	file, err := r.cache.fs.Open(path)
 	if err != nil {
@@ -158,7 +159,16 @@ func (r *Result) readCompressedFile(path string) ([]byte, error) {
 	}
 	defer func() { _ = reader.Close() }()
 
-	return io.ReadAll(reader)
+	maxSize := r.cache.effectiveMaxDataSize()
+	limited := io.LimitReader(reader, maxSize+1) // Read one extra byte to detect overflow
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxSize {
+		return nil, fmt.Errorf("decompressed data %s exceeds max size %d bytes", path, maxSize)
+	}
+	return data, nil
 }
 
 // Data returns all byte data as a map of name -> bytes.

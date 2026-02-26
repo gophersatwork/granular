@@ -94,6 +94,21 @@ func WithMaxSize(bytes int64) Option {
 	}
 }
 
+// WithMaxDataSize sets the maximum size in bytes for a single decompressed data read.
+// This limits the output of io.ReadAll when reading cached data, preventing OOM from
+// corrupted or malicious compressed data (gzip/zstd bombs).
+//
+// Default is 1 GiB. A value of 0 or negative resets to the default.
+//
+// Example:
+//
+//	cache, err := granular.Open(".cache", granular.WithMaxDataSize(100<<20)) // 100 MiB
+func WithMaxDataSize(bytes int64) Option {
+	return func(c *Cache) {
+		c.maxDataSize = bytes
+	}
+}
+
 // WithCompression sets the compression algorithm for stored data.
 // Supported types are CompressionGzip and CompressionZstd.
 // CompressionNone (empty string) disables compression (default).

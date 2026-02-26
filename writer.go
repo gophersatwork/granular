@@ -8,10 +8,24 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/afero"
 )
+
+// validateName checks that a logical name is safe for use in filesystem paths.
+// Rejects empty names, names containing path separators, the exact traversal
+// component "..", or null bytes.
+func validateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("invalid name: must not be empty")
+	}
+	if strings.ContainsAny(name, "/\\") || name == ".." || strings.ContainsRune(name, 0) {
+		return fmt.Errorf("invalid name %q: must not contain path separators or traversal sequences", name)
+	}
+	return nil
+}
 
 // WriteBuilder provides a fluent API for storing cache results.
 // Users should not construct this directly, use Cache.Put() instead.
@@ -23,6 +37,7 @@ type WriteBuilder struct {
 	metadata         map[string]string // metadata key-value pairs
 	errors           []error           // Accumulated validation errors (from key + write operations)
 	accumulateErrors bool              // If true, accumulate all errors; if false, fail-fast
+	committed        bool              // True after Commit() succeeds; prevents reuse
 }
 
 // File adds a file to be stored in the cache.
@@ -38,6 +53,14 @@ func (wb *WriteBuilder) File(name, srcPath string) *WriteBuilder {
 		}
 		wb.files[name] = srcPath
 		return wb
+	}
+
+	// Validate name is safe for filesystem paths
+	if err := validateName(name); err != nil {
+		wb.errors = append(wb.errors, err)
+		if !wb.accumulateErrors {
+			return wb
+		}
 	}
 
 	// Validate source file exists
@@ -66,6 +89,14 @@ func (wb *WriteBuilder) File(name, srcPath string) *WriteBuilder {
 // Bytes adds byte data to be stored in the cache.
 // name is the logical name for this data (used to retrieve it later).
 func (wb *WriteBuilder) Bytes(name string, data []byte) *WriteBuilder {
+	// Validate name is safe for filesystem paths
+	if err := validateName(name); err != nil {
+		wb.errors = append(wb.errors, err)
+		if !wb.accumulateErrors {
+			return wb
+		}
+	}
+
 	if wb.data == nil {
 		wb.data = make(map[string][]byte)
 	}
@@ -88,6 +119,10 @@ func (wb *WriteBuilder) Meta(key, value string) *WriteBuilder {
 // Returns a ValidationError if there are accumulated errors from key building or write operations.
 // Returns an error if the storage operation fails.
 func (wb *WriteBuilder) Commit() error {
+	if wb.committed {
+		return fmt.Errorf("WriteBuilder already committed")
+	}
+
 	startTime := time.Now()
 
 	// Check for accumulated validation errors first (no lock needed)
@@ -223,6 +258,10 @@ func (wb *WriteBuilder) Commit() error {
 	}
 
 	committed = true
+	wb.committed = true
+	wb.files = nil
+	wb.data = nil
+	wb.metadata = nil
 
 	// Report successful put with duration
 	wb.cache.metrics.put(keyHash, requiredSpace, time.Since(startTime))

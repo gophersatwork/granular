@@ -4,6 +4,7 @@ import (
 	"errors"
 	"hash"
 	"hash/fnv"
+	"strings"
 	"testing"
 	"time"
 
@@ -865,7 +866,7 @@ func TestWithMaxSize_LRUOrder(t *testing.T) {
 	}
 }
 
-// TestWithMaxSize_EntrySizeLargerThanMax tests adding an entry larger than max size
+// TestWithMaxSize_EntrySizeLargerThanMax tests that an entry larger than maxSize is rejected.
 func TestWithMaxSize_EntrySizeLargerThanMax(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
@@ -892,14 +893,15 @@ func TestWithMaxSize_EntrySizeLargerThanMax(t *testing.T) {
 	// Try to store an entry larger than max size (2KB data)
 	key := cache.Key().File("test.txt").Build()
 	err = cache.Put(key).Bytes("data", make([]byte, 2048)).Commit()
-	// The commit should still succeed, even if the entry exceeds max size
-	// (eviction will clear everything, but the new entry will still be stored)
-	if err != nil {
-		t.Fatalf("Commit failed: %v", err)
+	if err == nil {
+		t.Fatal("Commit should fail for entry exceeding max cache size")
+	}
+	if !strings.Contains(err.Error(), "exceeds max cache size") {
+		t.Fatalf("expected 'exceeds max cache size' error, got: %v", err)
 	}
 
-	// Entry should exist (even though it exceeds max size)
-	if !cache.Has(key) {
-		t.Error("Entry should exist even if it exceeds max size")
+	// Entry should not exist
+	if cache.Has(key) {
+		t.Error("Entry should not exist when it exceeds max cache size")
 	}
 }

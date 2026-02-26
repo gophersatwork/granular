@@ -19,6 +19,10 @@ import (
 // two-level directory sharding (e.g., "ab" from "abcdef123...").
 const hashPrefixLen = 2
 
+// defaultMaxDataSize is the maximum size for a single decompressed data read (1 GiB).
+// Prevents OOM from corrupted or malicious compressed data (gzip/zstd bombs).
+const defaultMaxDataSize = 1 << 30
+
 // Cache represents the main cache structure.
 // It provides content-addressed storage for files and data.
 //
@@ -38,6 +42,7 @@ type Cache struct {
 	fs               afero.Fs
 	accumulateErrors bool            // If true, accumulate all validation errors; if false, fail-fast
 	maxSize          int64           // Maximum cache size in bytes; 0 means no limit
+	maxDataSize      int64           // Maximum size for a single decompressed data read; 0 uses defaultMaxDataSize
 	compression      CompressionType // Compression algorithm for stored data
 	metrics          *MetricsHooks   // Optional metrics hooks for observability
 }
@@ -393,6 +398,12 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 		return nil // No limit set
 	}
 
+	// Reject entries that exceed the entire cache size on their own.
+	// Check early to avoid an expensive manifest walk and sort.
+	if requiredSpace > c.maxSize {
+		return fmt.Errorf("entry size %d exceeds max cache size %d", requiredSpace, c.maxSize)
+	}
+
 	// Get all entries with their sizes
 	var walkErr error
 	var corruptedKeys []string
@@ -468,4 +479,12 @@ func (c *Cache) entriesUnlocked(walkErr *error, corrupted *[]string) iter.Seq[En
 // Returns 0 if no size limit is set.
 func (c *Cache) MaxSize() int64 {
 	return c.maxSize
+}
+
+// effectiveMaxDataSize returns the configured max data size, or the default.
+func (c *Cache) effectiveMaxDataSize() int64 {
+	if c.maxDataSize > 0 {
+		return c.maxDataSize
+	}
+	return defaultMaxDataSize
 }

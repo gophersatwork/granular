@@ -820,6 +820,30 @@ func TestKeyBuilderHash(t *testing.T) {
 	}
 }
 
+// TestKeyBuilderBuildClones verifies that Build() clones internal state,
+// so continued use of the builder does not mutate already-built keys.
+func TestKeyBuilderBuildClones(t *testing.T) {
+	cache, _, _ := setupTestCache(t, "granular-build-clone-test")
+
+	builder := cache.Key().String("version", "1.0")
+	key1 := builder.Build()
+
+	// Continue adding inputs to the same builder
+	builder.String("version", "2.0")
+	key2 := builder.Build()
+
+	hash1 := key1.Hash()
+	hash2 := key2.Hash()
+
+	if hash1 == "" || hash2 == "" {
+		t.Fatal("Expected non-empty hashes")
+	}
+
+	if hash1 == hash2 {
+		t.Fatalf("key1 and key2 should have different hashes after builder mutation, got %s", hash1)
+	}
+}
+
 // TestCacheGC tests the GC() method for cleaning orphaned objects.
 func TestCacheGC(t *testing.T) {
 	cache, memFs, tempDir := setupTestCache(t, "granular-gc-test")
