@@ -125,7 +125,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	slices.Sort(outputs)
 
 	// Hash the number of outputs first
-	h.Write([]byte(fmt.Sprintf("%d", len(outputs))))
+	fmt.Fprintf(h, "%d", len(outputs))
 
 	// Hash each output file with length-prefixed path to prevent collisions
 	for _, output := range outputs {
@@ -142,7 +142,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	dataKeys := slices.Sorted(maps.Keys(outputData))
 
 	// Hash the number of data entries first
-	h.Write([]byte(fmt.Sprintf("%d", len(dataKeys))))
+	fmt.Fprintf(h, "%d", len(dataKeys))
 
 	// Hash each data entry with length-prefixed key to prevent collisions
 	for _, k := range dataKeys {
@@ -156,7 +156,7 @@ func (c *Cache) computeOutputHash(outputs []string, outputData map[string][]byte
 	metaKeys := slices.Sorted(maps.Keys(outputMeta))
 
 	// Hash the number of meta entries first
-	h.Write([]byte(fmt.Sprintf("%d", len(metaKeys))))
+	fmt.Fprintf(h, "%d", len(metaKeys))
 
 	// Hash each meta entry with length-prefixed encoding to prevent collisions
 	for _, k := range metaKeys {

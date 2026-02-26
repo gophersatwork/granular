@@ -1,6 +1,7 @@
 package granular
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -68,7 +69,7 @@ func (wb *WriteBuilder) Bytes(name string, data []byte) *WriteBuilder {
 		wb.data = make(map[string][]byte)
 	}
 	// Store a copy to prevent mutations
-	wb.data[name] = append([]byte(nil), data...)
+	wb.data[name] = bytes.Clone(data)
 	return wb
 }
 

@@ -1,6 +1,7 @@
 package granular
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -156,7 +157,7 @@ func (r *Result) Data() map[string][]byte {
 		data := r.Bytes(name)
 		if data != nil {
 			// Return copy to prevent mutation
-			result[name] = append([]byte(nil), data...)
+			result[name] = bytes.Clone(data)
 		}
 	}
 	return result
