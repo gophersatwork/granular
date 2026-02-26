@@ -107,8 +107,12 @@ func (wb *WriteBuilder) Commit() error {
 		return fmt.Errorf("failed to estimate entry size: %w", err)
 	}
 
-	// If max size is set, perform eviction under exclusive global lock.
+	// Reserve pending size so concurrent Commits see each other's reservations
+	// during eviction, preventing TOCTOU overflows of maxSize.
 	if wb.cache.maxSize > 0 {
+		wb.cache.pendingSize.Add(requiredSpace)
+		defer wb.cache.pendingSize.Add(-requiredSpace)
+
 		wb.cache.mu.Lock()
 		if err := wb.cache.evictIfNeeded(requiredSpace); err != nil {
 			wb.cache.mu.Unlock()

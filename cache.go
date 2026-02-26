@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -32,6 +33,7 @@ type Cache struct {
 	hashAlgoName     string // Name of the hash algorithm for manifest compatibility
 	nowFunc          NowFunc
 	mu               sync.RWMutex // Global lock for operations needing consistency (Clear, Stats, Prune, Entries)
+	pendingSize      atomic.Int64 // Sum of in-flight Commit sizes, used by eviction to avoid TOCTOU overflows
 	keyLocks         *keyLocks    // Per-key locking for concurrent access to different keys
 	fs               afero.Fs
 	accumulateErrors bool            // If true, accumulate all validation errors; if false, fail-fast
@@ -404,8 +406,10 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 		currentSize += entry.Size
 	}
 
-	// Check if we have enough space
-	if currentSize+requiredSpace <= c.maxSize {
+	// Include pending (in-flight) Commit sizes to prevent concurrent
+	// Commits from all passing eviction and exceeding maxSize.
+	pending := c.pendingSize.Load()
+	if currentSize+pending+requiredSpace <= c.maxSize {
 		return nil // Enough space
 	}
 

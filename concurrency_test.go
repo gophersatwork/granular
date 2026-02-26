@@ -467,3 +467,55 @@ func TestConcurrentReadWriteSameKey(t *testing.T) {
 		t.Fatal("Expected non-nil result")
 	}
 }
+
+// TestConcurrentCommitsRespectMaxSize verifies that concurrent Commits under a tight
+// maxSize do not cause the total cache size to exceed the limit by more than one entry.
+func TestConcurrentCommitsRespectMaxSize(t *testing.T) {
+	t.Parallel()
+
+	fs := afero.NewMemMapFs()
+
+	// Each entry is ~100 bytes of data. Allow room for only 5 entries.
+	entrySize := 100
+	maxSize := int64(entrySize * 5)
+
+	cache, err := Open(".cache", WithFs(fs), WithMaxSize(maxSize))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	// Create a shared source file
+	afero.WriteFile(fs, "input.txt", []byte("input"), 0o644)
+
+	const numWriters = 20
+	var wg sync.WaitGroup
+
+	for i := range numWriters {
+		wg.Go(func() {
+			key := cache.Key().
+				String("id", fmt.Sprintf("%d", i)).
+				Build()
+			data := make([]byte, entrySize)
+			for j := range data {
+				data[j] = byte(i)
+			}
+			cache.Put(key).Bytes("payload", data).Commit()
+		})
+	}
+
+	wg.Wait()
+
+	// Measure total cache size
+	stats, err := cache.Stats()
+	if err != nil {
+		t.Fatalf("Stats failed: %v", err)
+	}
+
+	// Allow one entry of slack since eviction is estimated pre-compression.
+	limit := maxSize + int64(entrySize)
+	if stats.TotalSize > limit {
+		t.Fatalf("Cache size %d exceeds maxSize %d + one entry slack %d (limit %d)",
+			stats.TotalSize, maxSize, entrySize, limit)
+	}
+}
