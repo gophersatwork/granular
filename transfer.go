@@ -167,12 +167,13 @@ func (c *Cache) Import(r io.Reader) error {
 
 	// Verify imported manifests by re-computing output hashes.
 	// This detects corruption or tampering in the archive.
-	return c.walkManifests(func(keyHash string, m *manifest) error {
+	var walkErr error
+	for keyHash, m := range c.manifests(&walkErr) {
 		if err := c.verifyOutputHash(m); err != nil {
 			// Remove the corrupted entry
 			_ = c.removeByHash(keyHash)
 			return fmt.Errorf("imported entry %s failed integrity check: %w", keyHash, err)
 		}
-		return nil
-	})
+	}
+	return walkErr
 }

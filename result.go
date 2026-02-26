@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"path/filepath"
 	"time"
@@ -223,13 +224,13 @@ func (r *Result) AccessedAt() time.Time {
 // Returns 0 if unable to determine size.
 func (r *Result) Size() int64 {
 	var total int64
-	for _, path := range r.files {
+	for path := range maps.Values(r.files) {
 		info, err := r.cache.fs.Stat(path)
 		if err == nil {
 			total += info.Size()
 		}
 	}
-	for _, path := range r.dataPaths {
+	for path := range maps.Values(r.dataPaths) {
 		info, err := r.cache.fs.Stat(path)
 		if err == nil {
 			total += info.Size()
@@ -242,4 +243,16 @@ func (r *Result) Size() int64 {
 // Useful for debugging and logging.
 func (r *Result) KeyHash() string {
 	return r.keyHash
+}
+
+// DataNames returns an iterator over the names of all data entries in the result.
+// Use BytesErr to load the actual data for a given name.
+func (r *Result) DataNames() iter.Seq[string] {
+	return maps.Keys(r.dataPaths)
+}
+
+// FileNames returns an iterator over the names of all file entries in the result.
+// Use File to get the cached path for a given name.
+func (r *Result) FileNames() iter.Seq[string] {
+	return maps.Keys(r.files)
 }

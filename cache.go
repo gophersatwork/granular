@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"hash"
+	"iter"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -296,7 +297,8 @@ func (c *Cache) Clear() error {
 	// Collect entries for metrics before removing
 	var entriesToEvict []Entry
 	if c.metrics != nil && c.metrics.OnEvict != nil {
-		entriesToEvict, _ = c.entriesUnlocked()
+		var walkErr error
+		entriesToEvict = slices.Collect(c.entriesUnlocked(&walkErr))
 	}
 
 	// Remove objects first, then manifests.
@@ -390,9 +392,10 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 	}
 
 	// Get all entries with their sizes
-	entries, err := c.entriesUnlocked()
-	if err != nil {
-		return fmt.Errorf("failed to get cache entries for eviction: %w", err)
+	var walkErr error
+	entries := slices.Collect(c.entriesUnlocked(&walkErr))
+	if walkErr != nil {
+		return fmt.Errorf("failed to get cache entries for eviction: %w", walkErr)
 	}
 
 	// Calculate current total size
@@ -409,10 +412,10 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 	// Sort by AccessedAt ascending (oldest/least recently accessed first).
 	// Use KeyHash as tiebreaker for deterministic eviction when timestamps are equal.
 	slices.SortFunc(entries, func(a, b Entry) int {
-		if c := cmp.Compare(a.AccessedAt.UnixNano(), b.AccessedAt.UnixNano()); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.KeyHash, b.KeyHash)
+		return cmp.Or(
+			cmp.Compare(a.AccessedAt.UnixNano(), b.AccessedAt.UnixNano()),
+			cmp.Compare(a.KeyHash, b.KeyHash),
+		)
 	})
 
 	// Evict until we have enough space.
@@ -434,27 +437,23 @@ func (c *Cache) evictIfNeeded(requiredSpace int64) error {
 	return nil
 }
 
-// entriesUnlocked returns all cache entries without acquiring locks.
-// Caller must hold at least a read lock on c.mu.
-func (c *Cache) entriesUnlocked() ([]Entry, error) {
-	var entries []Entry
-
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
-		entry := Entry{
-			KeyHash:    keyHash,
-			CreatedAt:  m.CreatedAt,
-			AccessedAt: m.AccessedAt,
-			Size:       c.manifestEntrySize(m),
-			FileCount:  len(m.OutputFiles) + len(m.OutputData),
+// entriesUnlocked returns an iterator over all cache entries without acquiring locks.
+// Walk errors are captured in walkErr. Caller must hold at least a read lock on c.mu.
+func (c *Cache) entriesUnlocked(walkErr *error) iter.Seq[Entry] {
+	return func(yield func(Entry) bool) {
+		for keyHash, m := range c.manifests(walkErr) {
+			entry := Entry{
+				KeyHash:    keyHash,
+				CreatedAt:  m.CreatedAt,
+				AccessedAt: m.AccessedAt,
+				Size:       c.manifestEntrySize(m),
+				FileCount:  len(m.OutputFiles) + len(m.OutputData),
+			}
+			if !yield(entry) {
+				return
+			}
 		}
-		entries = append(entries, entry)
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-
-	return entries, nil
 }
 
 // MaxSize returns the maximum cache size in bytes.

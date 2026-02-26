@@ -1,9 +1,13 @@
 package granular
 
 import (
+	"errors"
 	"fmt"
+	"iter"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,7 +39,8 @@ func (c *Cache) Stats() (Stats, error) {
 	stats := Stats{}
 	var oldest, newest time.Time
 
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
+	var walkErr error
+	for _, m := range c.manifests(&walkErr) {
 		stats.Entries++
 
 		// Track oldest and newest
@@ -48,11 +53,9 @@ func (c *Cache) Stats() (Stats, error) {
 
 		// Calculate size from manifest file references to avoid O(N^2) directory walks.
 		stats.TotalSize += c.manifestEntrySize(m)
-
-		return nil
-	})
-	if err != nil {
-		return Stats{}, err
+	}
+	if walkErr != nil {
+		return Stats{}, walkErr
 	}
 
 	now := c.now()
@@ -81,14 +84,14 @@ func (c *Cache) Prune(olderThan time.Duration) (int, error) {
 	}
 	var toRemove []entryToRemove
 
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
+	var walkErr error
+	for keyHash, m := range c.manifests(&walkErr) {
 		if m.CreatedAt.Before(cutoff) {
 			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
+	}
+	if walkErr != nil {
+		return 0, walkErr
 	}
 
 	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
@@ -121,14 +124,14 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	}
 	var toRemove []entryToRemove
 
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
+	var walkErr error
+	for keyHash, m := range c.manifests(&walkErr) {
 		if m.AccessedAt.Before(cutoff) {
 			toRemove = append(toRemove, entryToRemove{keyHash: keyHash, size: c.manifestEntrySize(m)})
 		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
+	}
+	if walkErr != nil {
+		return 0, walkErr
 	}
 
 	// Remove entries, acquiring per-key lock for each to prevent races with concurrent Get()
@@ -146,81 +149,100 @@ func (c *Cache) PruneUnused(notAccessedSince time.Duration) (int, error) {
 	return count, nil
 }
 
-// Entries returns an iterator over all cache entries.
-// Note: This holds a read lock during iteration, so process entries quickly.
+// Entries returns all cache entries as a slice.
 func (c *Cache) Entries() ([]Entry, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var entries []Entry
-
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
-		entry := Entry{
-			KeyHash:    keyHash,
-			CreatedAt:  m.CreatedAt,
-			AccessedAt: m.AccessedAt,
-			Size:       c.manifestEntrySize(m),
-			FileCount:  len(m.OutputFiles) + len(m.OutputData),
-		}
-		entries = append(entries, entry)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	var walkErr error
+	entries := slices.Collect(c.entriesUnlocked(&walkErr))
+	if walkErr != nil {
+		return nil, walkErr
 	}
-
 	return entries, nil
 }
 
-// walkManifests walks all manifest files and calls the function for each.
-func (c *Cache) walkManifests(fn func(keyHash string, m *manifest) error) error {
-	manifestDir := c.manifestDir()
+// EntriesIter returns an iterator over all cache entries.
+// It holds a read lock during iteration, released when the iterator
+// completes or the caller breaks. Walk errors are silently skipped;
+// use Entries() for explicit error handling.
+func (c *Cache) EntriesIter() iter.Seq[Entry] {
+	return func(yield func(Entry) bool) {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
 
-	return afero.Walk(c.fs, manifestDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
-
-		// Only process .json files
-		if !strings.HasSuffix(path, ".json") {
-			return nil
-		}
-
-		// Extract key hash from filename
-		keyHash := strings.TrimSuffix(filepath.Base(path), ".json")
-
-		// Load manifest
-		m, err := c.loadManifest(keyHash)
-		if err != nil {
-			// Remove corrupted manifest and its orphaned objects to prevent
-			// re-encountering this error on every subsequent walk.
-			c.metrics.error("walkManifests", fmt.Errorf("corrupted manifest %s: %w", keyHash, err))
-			_ = c.fs.Remove(path)
-			if objectDir, oErr := c.objectPath(keyHash); oErr == nil {
-				_ = c.fs.RemoveAll(objectDir)
+		var walkErr error
+		for entry := range c.entriesUnlocked(&walkErr) {
+			if !yield(entry) {
+				return
 			}
-			return nil
 		}
+	}
+}
 
-		return fn(keyHash, m)
-	})
+// errStopWalk is a sentinel error used to break out of afero.Walk
+// when the iterator consumer stops early.
+var errStopWalk = errors.New("stop walk")
+
+// manifests returns an iterator over all manifest files in the cache.
+// Walk errors are captured in walkErr. Corrupted manifests are cleaned up and skipped.
+func (c *Cache) manifests(walkErr *error) iter.Seq2[string, *manifest] {
+	return func(yield func(string, *manifest) bool) {
+		manifestDir := c.manifestDir()
+
+		err := afero.Walk(c.fs, manifestDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Skip directories
+			if info.IsDir() {
+				return nil
+			}
+
+			// Only process .json files
+			if !strings.HasSuffix(path, ".json") {
+				return nil
+			}
+
+			// Extract key hash from filename
+			keyHash := strings.TrimSuffix(filepath.Base(path), ".json")
+
+			// Load manifest
+			m, err := c.loadManifest(keyHash)
+			if err != nil {
+				// Remove corrupted manifest and its orphaned objects to prevent
+				// re-encountering this error on every subsequent walk.
+				c.metrics.error("manifests", fmt.Errorf("corrupted manifest %s: %w", keyHash, err))
+				_ = c.fs.Remove(path)
+				if objectDir, oErr := c.objectPath(keyHash); oErr == nil {
+					_ = c.fs.RemoveAll(objectDir)
+				}
+				return nil
+			}
+
+			if !yield(keyHash, m) {
+				return errStopWalk
+			}
+
+			return nil
+		})
+		if err != nil && !errors.Is(err, errStopWalk) {
+			*walkErr = err
+		}
+	}
 }
 
 // manifestEntrySize computes the size of a cache entry by statting the files
 // referenced in the manifest. This avoids a full directory walk per entry.
 func (c *Cache) manifestEntrySize(m *manifest) int64 {
 	var size int64
-	for _, path := range m.OutputFiles {
+	for path := range maps.Values(m.OutputFiles) {
 		if info, err := c.fs.Stat(path); err == nil {
 			size += info.Size()
 		}
 	}
-	for _, path := range m.OutputData {
+	for path := range maps.Values(m.OutputData) {
 		if info, err := c.fs.Stat(path); err == nil {
 			size += info.Size()
 		}
@@ -282,12 +304,12 @@ func (c *Cache) GC() (int, int64, error) {
 
 	// Step 1: Collect all valid object directory hashes from manifests
 	validHashes := make(map[string]bool)
-	err := c.walkManifests(func(keyHash string, m *manifest) error {
+	var walkErr error
+	for keyHash := range c.manifests(&walkErr) {
 		validHashes[keyHash] = true
-		return nil
-	})
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to walk manifests: %w", err)
+	}
+	if walkErr != nil {
+		return 0, 0, fmt.Errorf("failed to walk manifests: %w", walkErr)
 	}
 
 	// Step 2: Walk the objects directory and find orphans
@@ -297,7 +319,7 @@ func (c *Cache) GC() (int, int64, error) {
 
 	// Objects are stored as: objects/{first2chars}/{fullhash}/files
 	// Walk the sharded directories
-	err = afero.Walk(c.fs, objectsDir, func(path string, info os.FileInfo, err error) error {
+	err := afero.Walk(c.fs, objectsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// Skip errors (e.g., permission denied)
 			return nil

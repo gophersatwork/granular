@@ -306,7 +306,7 @@ func (wb *WriteBuilder) estimateSize() (int64, error) {
 	var totalSize int64
 
 	// Sum up file sizes
-	for _, srcPath := range wb.files {
+	for srcPath := range maps.Values(wb.files) {
 		info, err := wb.cache.fs.Stat(srcPath)
 		if err != nil {
 			return 0, fmt.Errorf("failed to stat file %s: %w", srcPath, err)
@@ -315,7 +315,7 @@ func (wb *WriteBuilder) estimateSize() (int64, error) {
 	}
 
 	// Sum up byte data sizes
-	for _, data := range wb.data {
+	for data := range maps.Values(wb.data) {
 		totalSize += int64(len(data))
 	}
 
