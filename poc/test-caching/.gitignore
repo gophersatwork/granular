@@ -1,0 +1,16 @@
+# Binaries
+run_tests_normal
+run_tests_cached
+
+# Cache directory
+.granular-test-cache/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.out

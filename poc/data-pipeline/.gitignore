@@ -1,0 +1,8 @@
+# Granular cache directory
+.granular-cache/
+
+# Generated data files
+data/
+
+# Compiled binary
+pipeline

@@ -1,0 +1,26 @@
+[tools]
+act = "latest"
+
+[tasks."ci:local"]
+description = "Run full CI pipeline locally using act"
+run = "./.scripts/run-ci-local.sh"
+
+[tasks."ci:test"]
+description = "Run test job locally"
+run = "./.scripts/run-ci-local.sh -j ci"
+
+[tasks."ci:verbose"]
+description = "Run CI locally with verbose output"
+run = "./.scripts/run-ci-local.sh -v"
+
+[tasks."ci:list"]
+description = "List available CI jobs"
+run = "./.scripts/run-ci-local.sh -l"
+
+[tasks."ci:pr"]
+description = "Run CI as pull_request event"
+run = "./.scripts/run-ci-local.sh -e pull_request"
+
+[tasks."ci:dry-run"]
+description = "Show what would run without executing"
+run = "./.scripts/run-ci-local.sh -n"

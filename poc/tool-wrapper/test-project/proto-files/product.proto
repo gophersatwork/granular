@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package example;
+
+option go_package = "github.com/example/proto/product";
+
+// Product represents a product in the catalog
+message Product {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  int32 stock = 5;
+}
+
+// ListProductsRequest is the request for listing products
+message ListProductsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+// ListProductsResponse is the response for listing products
+message ListProductsResponse {
+  repeated Product products = 1;
+  int32 total = 2;
+}

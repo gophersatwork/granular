@@ -1,0 +1,502 @@
+package granular
+
+import (
+	"bytes"
+	"fmt"
+	"hash"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/spf13/afero"
+)
+
+// KeyBuilder provides a fluent API for building cache keys.
+// It validates inputs eagerly and accumulates errors instead of panicking.
+// Errors are only surfaced when Get() or Commit() is called.
+type KeyBuilder struct {
+	cache            *Cache
+	inputs           []input
+	extras           map[string]string
+	errors           []error // Accumulated validation errors
+	accumulateErrors bool    // If true, accumulate all errors; if false, fail-fast
+}
+
+// Key represents an opaque cache key.
+// Users should not construct this directly, use Cache.Key() instead.
+type Key struct {
+	inputs []input
+	extras map[string]string
+	cache  *Cache
+	errors []error // Validation errors from key building
+}
+
+// input is the internal interface for cache inputs.
+// This is not exported - users interact via KeyBuilder methods.
+type input interface {
+	hash(h hash.Hash, fs afero.Fs) error
+	String() string
+}
+
+// fileInput represents a single file input.
+type fileInput struct {
+	path string
+}
+
+func (f fileInput) hash(h hash.Hash, fs afero.Fs) error {
+	file, err := fs.Open(f.path)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", f.path, err)
+	}
+	defer file.Close()
+
+	if err := hashFile(file, h); err != nil {
+		return fmt.Errorf("failed to hash file %s: %w", f.path, err)
+	}
+	return nil
+}
+
+func (f fileInput) String() string {
+	return fmt.Sprintf("file:%s", f.path)
+}
+
+// globInput represents a glob pattern input.
+type globInput struct {
+	pattern string
+	matches []string // Cached expansion result
+}
+
+func (g globInput) hash(h hash.Hash, fs afero.Fs) error {
+	matches := g.matches
+	if matches == nil {
+		// Fallback if not cached (shouldn't happen in normal flow)
+		var err error
+		matches, err = expandGlob(g.pattern, fs)
+		if err != nil {
+			return fmt.Errorf("glob %s: %w", g.pattern, err)
+		}
+	}
+
+	// Sort for deterministic ordering (may already be sorted)
+	slices.Sort(matches)
+
+	// Hash count of matches
+	_, _ = fmt.Fprintf(h, "%d", len(matches))
+
+	// Hash each matched file
+	for _, match := range matches {
+		h.Write([]byte(match))
+		file, err := fs.Open(match)
+		if err != nil {
+			return fmt.Errorf("failed to open glob match %s: %w", match, err)
+		}
+		if err := hashFile(file, h); err != nil {
+			file.Close()
+			return fmt.Errorf("failed to hash glob match %s: %w", match, err)
+		}
+		file.Close()
+	}
+
+	return nil
+}
+
+func (g globInput) String() string {
+	return fmt.Sprintf("glob:%s", g.pattern)
+}
+
+// dirInput represents a directory input.
+type dirInput struct {
+	path    string
+	exclude []string
+}
+
+func (d dirInput) hash(h hash.Hash, fs afero.Fs) error {
+	var files []string
+	err := afero.Walk(fs, d.path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check exclusions (basename only)
+		for _, pattern := range d.exclude {
+			matched, err := filepath.Match(pattern, filepath.Base(path))
+			if err != nil {
+				return fmt.Errorf("invalid exclude pattern %s: %w", pattern, err)
+			}
+			if matched {
+				return nil
+			}
+		}
+
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("dir %s: %w", d.path, err)
+	}
+
+	// Sort for deterministic ordering
+	slices.Sort(files)
+
+	// Hash count of files
+	_, _ = fmt.Fprintf(h, "%d", len(files))
+
+	// Hash each file
+	for _, filePath := range files {
+		h.Write([]byte(filePath))
+		file, err := fs.Open(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to open dir file %s: %w", filePath, err)
+		}
+		if err := hashFile(file, h); err != nil {
+			file.Close()
+			return fmt.Errorf("failed to hash dir file %s: %w", filePath, err)
+		}
+		file.Close()
+	}
+
+	return nil
+}
+
+func (d dirInput) String() string {
+	if len(d.exclude) == 0 {
+		return fmt.Sprintf("dir:%s", d.path)
+	}
+	return fmt.Sprintf("dir:%s(exclude:%s)", d.path, strings.Join(d.exclude, ","))
+}
+
+// bytesInput represents raw byte data input.
+type bytesInput struct {
+	data []byte
+	name string
+}
+
+func (b bytesInput) hash(h hash.Hash, fs afero.Fs) error {
+	return hashFile(bytes.NewReader(b.data), h)
+}
+
+func (b bytesInput) String() string {
+	if b.name != "" {
+		return fmt.Sprintf("bytes:%s", b.name)
+	}
+	return fmt.Sprintf("bytes:%d", len(b.data))
+}
+
+// File adds a file input to the cache key.
+// Validates that the file exists and accumulates any errors.
+// Errors are only surfaced when Get() or Commit() is called.
+func (kb *KeyBuilder) File(path string) *KeyBuilder {
+	// If fail-fast and already have errors, skip validation
+	if !kb.accumulateErrors && len(kb.errors) > 0 {
+		kb.inputs = append(kb.inputs, fileInput{path: path})
+		return kb
+	}
+
+	// Validate file exists
+	exists, err := afero.Exists(kb.cache.fs, path)
+	if err != nil {
+		kb.errors = append(kb.errors, fmt.Errorf("failed to check file %s: %w", path, err))
+	} else if !exists {
+		kb.errors = append(kb.errors, fmt.Errorf("file does not exist: %s", path))
+	}
+
+	kb.inputs = append(kb.inputs, fileInput{path: path})
+	return kb
+}
+
+// Glob adds a glob pattern input to the cache key.
+// Patterns support ** for recursive matching.
+// Validates the pattern and accumulates any errors.
+// Errors are only surfaced when Get() or Commit() is called.
+func (kb *KeyBuilder) Glob(pattern string) *KeyBuilder {
+	// If fail-fast and already have errors, skip validation
+	if !kb.accumulateErrors && len(kb.errors) > 0 {
+		kb.inputs = append(kb.inputs, globInput{pattern: pattern})
+		return kb
+	}
+
+	// Expand glob during validation and cache the result
+	matches, err := expandGlob(pattern, kb.cache.fs)
+	if err != nil {
+		kb.errors = append(kb.errors, fmt.Errorf("invalid glob pattern %s: %w", pattern, err))
+		kb.inputs = append(kb.inputs, globInput{pattern: pattern})
+		return kb
+	}
+
+	// Cache the matches
+	kb.inputs = append(kb.inputs, globInput{pattern: pattern, matches: matches})
+	return kb
+}
+
+// Dir adds a directory input to the cache key.
+// All files in the directory are included recursively.
+// exclude patterns match against basenames only.
+// Validates the directory and patterns, accumulating any errors.
+// Errors are only surfaced when Get() or Commit() is called.
+func (kb *KeyBuilder) Dir(path string, exclude ...string) *KeyBuilder {
+	// If fail-fast and already have errors, skip validation
+	if !kb.accumulateErrors && len(kb.errors) > 0 {
+		kb.inputs = append(kb.inputs, dirInput{path: path, exclude: exclude})
+		return kb
+	}
+
+	// Validate directory exists
+	exists, err := afero.DirExists(kb.cache.fs, path)
+	if err != nil {
+		kb.errors = append(kb.errors, fmt.Errorf("failed to check directory %s: %w", path, err))
+	} else if !exists {
+		kb.errors = append(kb.errors, fmt.Errorf("directory does not exist: %s", path))
+	}
+
+	// Validate exclude patterns
+	for _, pattern := range exclude {
+		_, err := filepath.Match(pattern, "test")
+		if err != nil {
+			kb.errors = append(kb.errors, fmt.Errorf("invalid exclude pattern %s: %w", pattern, err))
+			// If fail-fast, stop validating exclude patterns after first error
+			if !kb.accumulateErrors {
+				break
+			}
+		}
+	}
+
+	kb.inputs = append(kb.inputs, dirInput{path: path, exclude: exclude})
+	return kb
+}
+
+// Bytes adds raw byte data as an input to the cache key.
+// name is optional and used for debugging/logging.
+func (kb *KeyBuilder) Bytes(data []byte) *KeyBuilder {
+	kb.inputs = append(kb.inputs, bytesInput{data: data, name: ""})
+	return kb
+}
+
+// String adds a key-value pair to the cache key.
+// This is useful for versioning, configuration, or other metadata.
+// Both key and value must be valid UTF-8; invalid input is rejected at Get/Commit.
+func (kb *KeyBuilder) String(key, value string) *KeyBuilder {
+	if err := validateUTF8("extras key", key); err != nil {
+		kb.errors = append(kb.errors, err)
+		if !kb.accumulateErrors {
+			return kb
+		}
+	}
+	if err := validateUTF8("extras value", value); err != nil {
+		kb.errors = append(kb.errors, err)
+		if !kb.accumulateErrors {
+			return kb
+		}
+	}
+	if kb.extras == nil {
+		kb.extras = make(map[string]string)
+	}
+	kb.extras[key] = value
+	return kb
+}
+
+// Version is sugar for String("version", v).
+func (kb *KeyBuilder) Version(v string) *KeyBuilder {
+	return kb.String("version", v)
+}
+
+// Env adds an environment variable to the cache key.
+// If the variable is not set, it uses an empty string.
+func (kb *KeyBuilder) Env(key string) *KeyBuilder {
+	return kb.String("env:"+key, os.Getenv(key))
+}
+
+// Build finalizes the key builder and returns an opaque Key.
+// Validation errors are not returned here but will be surfaced
+// when the key is used in Get() or Commit().
+func (kb *KeyBuilder) Build() Key {
+	return Key{
+		inputs: slices.Clone(kb.inputs),
+		extras: maps.Clone(kb.extras),
+		cache:  kb.cache,
+		errors: slices.Clone(kb.errors),
+	}
+}
+
+// Hash computes and returns the hash of this key as a hex string.
+// This is useful for debugging and logging.
+// Returns empty string if there are validation errors.
+func (kb *KeyBuilder) Hash() string {
+	key := kb.Build()
+	compHash, err := key.computeHash()
+	if err != nil {
+		return ""
+	}
+	return compHash
+}
+
+// Hash returns the hash of this key as a hex string.
+// This is useful for debugging and logging.
+// Returns empty string if there are validation errors.
+func (k Key) Hash() string {
+	compHash, err := k.computeHash()
+	if err != nil {
+		return ""
+	}
+	return compHash
+}
+
+// computeHash calculates the hash for this key.
+// Returns an error if there are validation errors from key building.
+func (k Key) computeHash() (string, error) {
+	// Check for validation errors first
+	if len(k.errors) > 0 {
+		return "", newValidationError(k.errors)
+	}
+
+	// Reject empty keys with no inputs
+	if len(k.inputs) == 0 && len(k.extras) == 0 {
+		return "", newValidationError([]error{
+			fmt.Errorf("key has no inputs: add at least one File, Glob, Dir, Bytes, String, or Version input"),
+		})
+	}
+
+	h := k.cache.newHash()
+
+	// Hash all inputs with length-prefixed descriptors to prevent collisions
+	for _, hi := range k.inputs {
+		desc := hi.String()
+		fmt.Fprintf(h, "%d:", len(desc))
+		h.Write([]byte(desc))
+		if err := hi.hash(h, k.cache.fs); err != nil {
+			return "", err
+		}
+	}
+
+	// Hash extras in sorted order for determinism
+	if len(k.extras) > 0 {
+		keys := slices.Sorted(maps.Keys(k.extras))
+
+		for _, key := range keys {
+			// Length-prefix key and value to prevent collisions:
+			// String("ab","cd") vs String("a","bcd") must hash differently.
+			fmt.Fprintf(h, "%d:", len(key))
+			h.Write([]byte(key))
+			fmt.Fprintf(h, "%d:", len(k.extras[key]))
+			h.Write([]byte(k.extras[key]))
+		}
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// expandGlob expands a glob pattern (supporting **) and returns matching file paths.
+func expandGlob(pattern string, fs afero.Fs) ([]string, error) {
+	hasRecursive := strings.Contains(pattern, "**")
+
+	// Determine base directory
+	baseDir := "."
+	if hasRecursive {
+		parts := strings.Split(pattern, "**")
+		baseDir = filepath.Dir(parts[0])
+		if baseDir == "." && parts[0] != "" && !strings.HasSuffix(parts[0], "/") && !strings.HasSuffix(parts[0], string(filepath.Separator)) {
+			baseDir = parts[0]
+		}
+	} else {
+		baseDir = filepath.Dir(pattern)
+	}
+
+	if baseDir == "." {
+		baseDir = ""
+	}
+
+	// Check if base directory exists
+	if baseDir != "" {
+		exists, err := afero.DirExists(fs, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, nil // No matches, not an error
+		}
+	}
+
+	// Walk and match files
+	var matches []string
+	err := afero.Walk(fs, baseDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			// For non-recursive patterns, skip subdirectories to match standard
+			// glob semantics: src/*.go matches only files directly in src/, not
+			// files in src/pkg/ or deeper.
+			if !hasRecursive && path != baseDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if hasRecursive {
+			if matchesGlobPattern(path, pattern) {
+				matches = append(matches, path)
+			}
+		} else {
+			filePattern := filepath.Base(pattern)
+			matched, err := filepath.Match(filePattern, filepath.Base(path))
+			if err != nil {
+				return err
+			}
+			if matched {
+				matches = append(matches, path)
+			}
+		}
+
+		return nil
+	})
+
+	return matches, err
+}
+
+// matchesGlobPattern checks if a path matches a pattern with ** support.
+func matchesGlobPattern(path, pattern string) bool {
+	pattern = filepath.ToSlash(pattern)
+	path = filepath.ToSlash(path)
+
+	patternParts := strings.Split(pattern, "/")
+	pathParts := strings.Split(path, "/")
+
+	return matchGlobParts(pathParts, patternParts, 0, 0)
+}
+
+// matchGlobParts recursively matches path parts against pattern parts.
+func matchGlobParts(pathParts, patternParts []string, pathIdx, patternIdx int) bool {
+	if patternIdx >= len(patternParts) {
+		return pathIdx >= len(pathParts)
+	}
+
+	if pathIdx >= len(pathParts) {
+		for i := patternIdx; i < len(patternParts); i++ {
+			if patternParts[i] != "**" {
+				return false
+			}
+		}
+		return true
+	}
+
+	patternPart := patternParts[patternIdx]
+	pathPart := pathParts[pathIdx]
+
+	if patternPart == "**" {
+		if matchGlobParts(pathParts, patternParts, pathIdx, patternIdx+1) {
+			return true
+		}
+		return matchGlobParts(pathParts, patternParts, pathIdx+1, patternIdx)
+	}
+
+	matched, err := filepath.Match(patternPart, pathPart)
+	if err != nil || !matched {
+		return false
+	}
+
+	return matchGlobParts(pathParts, patternParts, pathIdx+1, patternIdx+1)
+}

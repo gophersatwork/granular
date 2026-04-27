@@ -1,0 +1,65 @@
+package granular
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// Sentinel errors
+var (
+	// ErrCacheMiss is returned when a cache entry is not found.
+	ErrCacheMiss = errors.New("cache miss")
+
+	// ErrCacheCorrupted is returned when a cache entry fails integrity verification.
+	// This indicates the cached data has been modified or corrupted since it was stored.
+	ErrCacheCorrupted = errors.New("cache entry corrupted")
+
+	// ErrHashAlgoMismatch is returned when a cache entry was created with a different
+	// hash algorithm than the one currently configured. The entry is treated as a miss
+	// since the key hash would be different.
+	ErrHashAlgoMismatch = errors.New("hash algorithm mismatch")
+
+	// ErrCompressionMismatch indicates a cache entry was created with a different
+	// compression type than the one currently configured. Get() auto-evicts such
+	// entries and returns ErrCacheMiss so callers can recompute transparently.
+	ErrCompressionMismatch = errors.New("compression type mismatch")
+)
+
+// ValidationError represents one or more validation errors that occurred
+// during key building or write operations.
+type ValidationError struct {
+	Errors []error
+}
+
+// Error implements the error interface.
+func (ve *ValidationError) Error() string {
+	if len(ve.Errors) == 0 {
+		return "validation failed"
+	}
+	if len(ve.Errors) == 1 {
+		return fmt.Sprintf("validation failed: %v", ve.Errors[0])
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("validation failed with %d errors:\n", len(ve.Errors)))
+	for i, err := range ve.Errors {
+		_, _ = fmt.Fprintf(&buf, "  %d. %v\n", i+1, err)
+	}
+	return buf.String()
+}
+
+// Unwrap returns the underlying errors for use with errors.Is and errors.As.
+// This implements the multi-error unwrap interface introduced in Go 1.20.
+func (ve *ValidationError) Unwrap() []error {
+	return ve.Errors
+}
+
+// newValidationError creates a ValidationError from a slice of errors.
+// Returns nil if the slice is empty.
+func newValidationError(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	return &ValidationError{Errors: errs}
+}

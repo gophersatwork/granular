@@ -1,0 +1,34 @@
+[tools]
+go = "1.26.0"
+"go:mvdan.cc/gofumpt" = "0.8.0"
+"go:honnef.co/go/tools/cmd/staticcheck" = "0.6.1"
+
+[tasks.fmt-check-files]
+description = "List files that need formatting"
+run = "go tool gofumpt -l ."
+
+[tasks.fmt-check-diff]
+description = "Show formatting differences"
+run = "go tool gofumpt -d ."
+
+[tasks.fmt]
+description = "Format all Go files"
+run = "go tool gofumpt -w ."
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run linters (vet and staticcheck)"
+run = """
+go vet ./...
+go tool staticcheck
+"""
+
+[tasks.check]
+description = "Run formatting check, linting, and tests"
+depends = ["fmt-check-diff", "lint", "test"]
+
+[settings]
+experimental = true

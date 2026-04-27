@@ -1,10 +1,11 @@
 module github.com/gophersatwork/granular
 
-go 1.24
+go 1.26
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/davecgh/go-spew v1.1.1
+	github.com/klauspost/compress v1.18.3
 	github.com/spf13/afero v1.11.0
 )
 
