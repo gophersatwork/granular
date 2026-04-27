@@ -20,4 +20,8 @@ poc/*/charts/
 poc/*/sample_output/
 poc/data-pipeline/data_*.csv
 poc/data-pipeline/report.*
-poc/data-pipeline/*.pdfcoverage.out
+poc/data-pipeline/*.pdf
+
+# Test/build artifacts
+coverage.out
+*.test
