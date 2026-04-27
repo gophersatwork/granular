@@ -84,7 +84,8 @@ func main() {
 	if *clearCache {
 		fmt.Println("🗑️  Clearing cache...")
 		cache.Clear()
-		fmt.Println("✓ Cache cleared\n")
+		fmt.Println("✓ Cache cleared")
+		fmt.Println()
 	}
 
 	// Handle show stats flag
