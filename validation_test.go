@@ -803,3 +803,52 @@ func TestWriteBuilder_NameInjection(t *testing.T) {
 		}
 	})
 }
+
+// TestWriteBuilder_RejectsInvalidUTF8 verifies that Put rejects strings
+// containing invalid UTF-8 byte sequences. Manifests are persisted as JSON
+// which silently substitutes U+FFFD for invalid bytes; rejecting at the
+// API boundary keeps the Put/Get round-trip lossless.
+func TestWriteBuilder_RejectsInvalidUTF8(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cache, err := Open(".cache", WithFs(fs))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer cache.Close()
+
+	afero.WriteFile(fs, "/src/test.txt", []byte("hello"), 0o644)
+
+	const invalid = "\xc9" // standalone continuation byte, invalid UTF-8
+
+	t.Run("Meta_value", func(t *testing.T) {
+		key := cache.Key().String("v", "1").Build()
+		err := cache.Put(key).Bytes("out", []byte("x")).Meta("k", invalid).Commit()
+		if err == nil || !strings.Contains(err.Error(), "non-UTF-8") {
+			t.Fatalf("expected non-UTF-8 rejection, got: %v", err)
+		}
+	})
+
+	t.Run("Meta_key", func(t *testing.T) {
+		key := cache.Key().String("v", "1").Build()
+		err := cache.Put(key).Bytes("out", []byte("x")).Meta(invalid, "v").Commit()
+		if err == nil || !strings.Contains(err.Error(), "non-UTF-8") {
+			t.Fatalf("expected non-UTF-8 rejection, got: %v", err)
+		}
+	})
+
+	t.Run("Bytes_name", func(t *testing.T) {
+		key := cache.Key().String("v", "1").Build()
+		err := cache.Put(key).Bytes(invalid, []byte("x")).Commit()
+		if err == nil || !strings.Contains(err.Error(), "non-UTF-8") {
+			t.Fatalf("expected non-UTF-8 rejection, got: %v", err)
+		}
+	})
+
+	t.Run("Key_String_value", func(t *testing.T) {
+		key := cache.Key().String("v", invalid).Build()
+		err := cache.Put(key).Bytes("out", []byte("x")).Commit()
+		if err == nil || !strings.Contains(err.Error(), "non-UTF-8") {
+			t.Fatalf("expected non-UTF-8 rejection, got: %v", err)
+		}
+	})
+}

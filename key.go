@@ -278,7 +278,20 @@ func (kb *KeyBuilder) Bytes(data []byte) *KeyBuilder {
 
 // String adds a key-value pair to the cache key.
 // This is useful for versioning, configuration, or other metadata.
+// Both key and value must be valid UTF-8; invalid input is rejected at Get/Commit.
 func (kb *KeyBuilder) String(key, value string) *KeyBuilder {
+	if err := validateUTF8("extras key", key); err != nil {
+		kb.errors = append(kb.errors, err)
+		if !kb.accumulateErrors {
+			return kb
+		}
+	}
+	if err := validateUTF8("extras value", value); err != nil {
+		kb.errors = append(kb.errors, err)
+		if !kb.accumulateErrors {
+			return kb
+		}
+	}
 	if kb.extras == nil {
 		kb.extras = make(map[string]string)
 	}

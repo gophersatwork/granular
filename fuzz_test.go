@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/afero"
 )
@@ -63,6 +64,14 @@ func FuzzManifestFields(f *testing.F) {
 	f.Add("keyhash123", "input1", "key1", "value1", "file.txt", "path/to/file", "meta1", "metaval1")
 
 	f.Fuzz(func(t *testing.T, keyHash, input, extraKey, extraVal, outputName, outputPath, metaKey, metaVal string) {
+		// Manifests are persisted as JSON, which cannot represent invalid UTF-8;
+		// the public API rejects such input at the Put boundary (see validateUTF8).
+		// Skip non-UTF-8 inputs here so the fuzz test reflects the actual contract.
+		for _, s := range []string{keyHash, input, extraKey, extraVal, outputName, outputPath, metaKey, metaVal} {
+			if !utf8.ValidString(s) {
+				return
+			}
+		}
 		// Create manifest structure
 		m := manifest{
 			KeyHash:     keyHash,
@@ -237,6 +246,11 @@ func FuzzCachePutGet(f *testing.F) {
 	f.Fuzz(func(t *testing.T, filename string, inputData, outputData []byte, metaKey, metaValue string) {
 		// Skip invalid filenames
 		if filename == "" || strings.Contains(filename, "\x00") || strings.Contains(filename, string([]byte{0xFF})) {
+			return
+		}
+		// The Put API rejects non-UTF-8 strings (see validateUTF8). Skip those
+		// inputs so the fuzz test exercises the round-trip contract callers see.
+		if !utf8.ValidString(filename) || !utf8.ValidString(metaKey) || !utf8.ValidString(metaValue) {
 			return
 		}
 

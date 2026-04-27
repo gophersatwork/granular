@@ -9,19 +9,34 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/afero"
 )
 
+// validateUTF8 rejects strings that are not valid UTF-8. Manifests are
+// persisted as JSON, which silently replaces invalid byte sequences with
+// U+FFFD on encode — that breaks the Put/Get round-trip. Reject at the
+// API boundary so callers get a clear error instead of a later corruption.
+func validateUTF8(field, s string) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("invalid %s: contains non-UTF-8 bytes", field)
+	}
+	return nil
+}
+
 // validateName checks that a logical name is safe for use in filesystem paths.
 // Rejects empty names, names containing path separators, the exact traversal
-// component "..", or null bytes.
+// component "..", null bytes, or non-UTF-8 byte sequences.
 func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("invalid name: must not be empty")
 	}
 	if strings.ContainsAny(name, "/\\") || name == ".." || strings.ContainsRune(name, 0) {
 		return fmt.Errorf("invalid name %q: must not contain path separators or traversal sequences", name)
+	}
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("invalid name: contains non-UTF-8 bytes")
 	}
 	return nil
 }
@@ -107,7 +122,20 @@ func (wb *WriteBuilder) Bytes(name string, data []byte) *WriteBuilder {
 
 // Meta adds metadata to the cache entry.
 // Metadata is stored as string key-value pairs.
+// Both key and value must be valid UTF-8; invalid input is rejected at Commit.
 func (wb *WriteBuilder) Meta(key, value string) *WriteBuilder {
+	if err := validateUTF8("metadata key", key); err != nil {
+		wb.errors = append(wb.errors, err)
+		if !wb.accumulateErrors {
+			return wb
+		}
+	}
+	if err := validateUTF8("metadata value", value); err != nil {
+		wb.errors = append(wb.errors, err)
+		if !wb.accumulateErrors {
+			return wb
+		}
+	}
 	if wb.metadata == nil {
 		wb.metadata = make(map[string]string)
 	}
